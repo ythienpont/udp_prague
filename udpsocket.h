@@ -210,14 +210,11 @@ public:
           v6->sin6_port = htons(port);
           own_len = sizeof(sockaddr_in6);
 
-
-          // Disables dual-stack behaviour
-          // XXX Check if we want this, implementation is platform specific
+          // Toggles dual-stack behaviour
           int v6only = !IS_DUALSTACK;
           setsockopt(sockfd, IPPROTO_IPV6, IPV6_V6ONLY, &v6only, sizeof(v6only));
         }
 
-        // XXX Set peer length?
         peer_len = own_len;
 
         if (bind(sockfd, (sockaddr*)(&own_addr), own_len) < 0) {
@@ -319,7 +316,7 @@ public:
         rcv_iov[0].iov_base = buf;
 
         rcv_msg.msg_name = &peer_addr;
-        rcv_msg.msg_namelen = peer_len; // XXX Or sizeof(peer_addr)?
+        rcv_msg.msg_namelen = peer_len;
         rcv_msg.msg_iov = rcv_iov;
         rcv_msg.msg_iovlen = 1;
         rcv_msg.msg_control = ctrl_msg;
@@ -401,7 +398,7 @@ public:
         if (current_ecn != ecn) {
             unsigned int ecn_set = ecn;
 
-            if (peer_len == sizeof(sockaddr_in)) { // XXX Stupid
+            if (peer_len == sizeof(sockaddr_in)) { // Check for IPv4
               if (setsockopt(sockfd, IPPROTO_IP, IP_TOS, &ecn_set, sizeof(ecn_set)) < 0) {
                   printf("Could not apply ecn %d,\n", ecn);
                   return -1;
