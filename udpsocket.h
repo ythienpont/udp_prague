@@ -51,7 +51,7 @@ typedef struct sockaddr SOCKADDR;
 #define SOCKET_ERROR SO_ERROR
 #endif
 
-#define IS_DUALSTACK 0
+#define IS_DUALSTACK 1
 
 class UDPSocket {
 #ifdef WIN32
@@ -76,7 +76,6 @@ class UDPSocket {
 
         unsigned int set = 1;
 
-        // XXX If we're on Linux (i.e., not Apple) we should also set this
         if (family == AF_INET) {
           if (setsockopt(sockfd, IPPROTO_IP, IP_RECVTOS, &set, sizeof(set)) < 0) {
               perror("setsockopt for IP_RECVTOS failed.\n");
@@ -87,6 +86,15 @@ class UDPSocket {
               perror("setsockopt for IPV6_RECVTCLASS failed.\n");
                   exit(EXIT_FAILURE);
           }
+#ifdef __linux__ 
+          // On Apple hosts, the application only sets IPV6_RECVTCLASS; setting IP_RECVTOS will return an error.
+          if (IS_DUALSTACK) {
+            if (setsockopt(sockfd, IPPROTO_IP, IP_RECVTOS, &set, sizeof(set)) < 0) {
+                perror("setsockopt for IP_RECVTOS failed.\n");
+                    exit(EXIT_FAILURE);
+            }
+          }
+#endif
         }
 
     }
@@ -408,6 +416,16 @@ public:
                   printf("Could not apply ecn %d,\n", ecn);
                   return -1;
               }
+
+#ifdef __linux__ 
+              // On Apple hosts, the application only sets IPV6_TCLASS;
+              if (IS_DUALSTACK) {
+                if (setsockopt(sockfd, IPPROTO_IP, IP_TOS, &ecn_set, sizeof(ecn_set)) < 0) {
+                    perror("setsockopt for IP_RECVTOS failed.\n");
+                        exit(EXIT_FAILURE);
+                }
+              }
+#endif
             }
             current_ecn = ecn;
         }
