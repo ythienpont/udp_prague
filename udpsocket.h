@@ -51,6 +51,8 @@ typedef struct sockaddr SOCKADDR;
 #define SOCKET_ERROR SO_ERROR
 #endif
 
+#define IS_DUALSTACK 0
+
 class UDPSocket {
 #ifdef WIN32
     WSADATA wsaData;
@@ -58,10 +60,36 @@ class UDPSocket {
     LPFN_WSASENDMSG WSASendMsg;
 #endif
     ecn_tp current_ecn;
-    sockaddr_storage peer_addr;
-    socklen_t peer_len;
+    sockaddr_storage peer_addr{};
+    socklen_t peer_len = 0;
     SOCKET sockfd;
     bool connected;
+
+    // Initialize the socket with provided family
+    void init_socket(int family) noexcept {
+        sockfd = socket(family, SOCK_DGRAM, 0);
+
+        if (sockfd < 0) {
+            perror("Socket creation failed.\n");
+            exit(EXIT_FAILURE);
+        }
+
+        unsigned int set = 1;
+
+        // XXX If we're on Linux (i.e., not Apple) we should also set this
+        if (family == AF_INET) {
+          if (setsockopt(sockfd, IPPROTO_IP, IP_RECVTOS, &set, sizeof(set)) < 0) {
+              perror("setsockopt for IP_RECVTOS failed.\n");
+                  exit(EXIT_FAILURE);
+          }
+        } else {
+          if (setsockopt(sockfd, IPPROTO_IPV6, IPV6_RECVTCLASS, &set, sizeof(set)) < 0) {
+              perror("setsockopt for IPV6_RECVTCLASS failed.\n");
+                  exit(EXIT_FAILURE);
+          }
+        }
+
+    }
 public:
     UDPSocket() :
 #ifdef WIN32
@@ -149,7 +177,7 @@ public:
     }
 
     void Bind(const char* addr, uint32_t port) {
-            struct addrinfo hints{}, *result = nullptr;
+        struct addrinfo hints{}, *result = nullptr;
 
         hints.ai_family = AF_UNSPEC;    /* Allow IPv4 or IPv6 */
         hints.ai_socktype = SOCK_DGRAM; /* Datagram socket */
@@ -161,26 +189,23 @@ public:
 
         int family = result->ai_family;
 
+        init_socket(family);
+
         freeaddrinfo(result);
 
-        sockfd = socket(family, SOCK_DGRAM, 0);
-
-        if (sockfd < 0) {
-            perror("Socket creation failed.\n");
-            exit(1);
-        }
-
-        sockaddr_storage own_addr{};
+        sockaddr_storage own_addr;
+        memset(&own_addr, 0, sizeof(own_addr));
         socklen_t own_len;
 
         if (family == AF_INET) {
-          sockaddr_in* v4 = reinterpret_cast<sockaddr_in*>(&own_addr);
+          sockaddr_in* v4 = (sockaddr_in*)(&own_addr);
 
           v4->sin_family = AF_INET;
           v4->sin_port = htons(port);
           v4->sin_addr.s_addr = inet_addr(addr);
+          own_len = sizeof(sockaddr_in);
         } else {
-          sockaddr_in6* v6 = reinterpret_cast<sockaddr_in6*>(&own_addr);
+          sockaddr_in6* v6 = (sockaddr_in6*)(&own_addr);
           v6->sin6_family = AF_INET6;
           v6->sin6_port = htons(port);
           own_len = sizeof(sockaddr_in6);
@@ -188,14 +213,14 @@ public:
 
           // Disables dual-stack behaviour
           // XXX Check if we want this, implementation is platform specific
-          int v6only = 1;
+          int v6only = !IS_DUALSTACK;
           setsockopt(sockfd, IPPROTO_IPV6, IPV6_V6ONLY, &v6only, sizeof(v6only));
         }
 
         // XXX Set peer length?
         peer_len = own_len;
 
-        if (bind(sockfd, reinterpret_cast<sockaddr*>(&own_addr), own_len) < 0) {
+        if (bind(sockfd, (sockaddr*)(&own_addr), own_len) < 0) {
           perror("Bind failed");
           exit(EXIT_FAILURE);
         }
@@ -207,7 +232,6 @@ public:
         hints.ai_family = AF_UNSPEC;    /* Allow IPv4 or IPv6 */
         hints.ai_socktype = SOCK_DGRAM; /* Datagram socket */
 
-
         // Convert port number to a string
         char portbuf[16];
         snprintf(portbuf, sizeof(portbuf), "%u", port);
@@ -217,12 +241,7 @@ public:
           exit(EXIT_FAILURE);
         }
 
-        sockfd = socket(result->ai_family, SOCK_DGRAM, 0);
-
-        if (sockfd < 0) {
-            perror("Socket creation failed.\n");
-            exit(1);
-        }
+        init_socket(result->ai_family);
 
         memcpy(&peer_addr, result->ai_addr, result->ai_addrlen);
         peer_len = result->ai_addrlen;
@@ -300,11 +319,12 @@ public:
         rcv_iov[0].iov_base = buf;
 
         rcv_msg.msg_name = &peer_addr;
-        rcv_msg.msg_namelen = sizeof(peer_addr);
+        rcv_msg.msg_namelen = peer_len; // XXX Or sizeof(peer_addr)?
         rcv_msg.msg_iov = rcv_iov;
         rcv_msg.msg_iovlen = 1;
         rcv_msg.msg_control = ctrl_msg;
         rcv_msg.msg_controllen = sizeof(ctrl_msg);
+
 
         if (timeout > 0) {
             struct timeval tv_in;
@@ -324,23 +344,28 @@ public:
                 return 0;
             }
         }
+
         if ((r = recvmsg(sockfd, &rcv_msg, 0)) < 0) {
             perror("Fail to recv UDP message from socket\n");
             exit(1);
         }
+
         struct cmsghdr *cmptr = CMSG_FIRSTHDR(&rcv_msg);
 #ifdef __linux__
-        if ((cmptr->cmsg_level != IPPROTO_IP) || (cmptr->cmsg_type != IP_TOS)) {
+        if (!(cmptr->cmsg_level == IPPROTO_IP) && (cmptr->cmsg_type == IP_TOS) &&
+            !(cmptr->cmsg_level == IPPROTO_IPV6) && (cmptr->cmsg_type == IPV6_TCLASS)) {
 #else  // other Unix
         if ((cmptr->cmsg_level != IPPROTO_IP) || (cmptr->cmsg_type != IP_RECVTOS)) {
 #endif
             perror("Fail to recv IP.ECN field from packet\n");
             exit(1);
         }
+
         ecn = (ecn_tp)((unsigned char)(*(uint32_t*)CMSG_DATA(cmptr)) & ECN_MASK);
         return r;
 #endif
     }
+
     size_tp Send(char *buf, size_tp len, ecn_tp ecn)
     {
         ssize_t rc = -1;
@@ -375,9 +400,17 @@ public:
 #else
         if (current_ecn != ecn) {
             unsigned int ecn_set = ecn;
-            if (setsockopt(sockfd, IPPROTO_IP, IP_TOS, &ecn_set, sizeof(ecn_set)) < 0) {
-                printf("Could not apply ecn %d,\n", ecn);
-                return -1;
+
+            if (peer_len == sizeof(sockaddr_in)) { // XXX Stupid
+              if (setsockopt(sockfd, IPPROTO_IP, IP_TOS, &ecn_set, sizeof(ecn_set)) < 0) {
+                  printf("Could not apply ecn %d,\n", ecn);
+                  return -1;
+              }
+            } else {
+              if (setsockopt(sockfd, IPPROTO_IPV6, IPV6_TCLASS, &ecn_set, sizeof(ecn_set)) < 0) {
+                  printf("Could not apply ecn %d,\n", ecn);
+                  return -1;
+              }
             }
             current_ecn = ecn;
         }
