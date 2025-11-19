@@ -27,10 +27,16 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #elif __APPLE__
+#include <pthread.h>
+#include <sched.h>
+#include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
 #include <unistd.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <netdb.h>
 #endif
 #ifdef __MUSL__
 #include <sys/time.h>
@@ -60,13 +66,13 @@ class UDPSocket {
     LPFN_WSASENDMSG WSASendMsg;
 #endif
     ecn_tp current_ecn;
-    sockaddr_storage peer_addr{};
-    socklen_t peer_len = 0;
+    sockaddr_storage peer_addr;
+    socklen_t peer_len;
     SOCKET sockfd;
     bool connected;
 
     // Initialize the socket with provided family
-    void init_socket(int family) noexcept {
+    void init_socket(const int family) {
         sockfd = socket(family, SOCK_DGRAM, 0);
 
         if (sockfd < 0) {
@@ -103,7 +109,7 @@ public:
 #ifdef WIN32
         WSARecvMsg(NULL), WSASendMsg(NULL),
 #endif
-        current_ecn(ecn_not_ect), connected(false) {
+        current_ecn(ecn_not_ect), peer_addr{}, peer_len(0), sockfd(-1), connected(false) {
 #ifdef WIN32
         DWORD dwPriClass;
         if (!SetPriorityClass(GetCurrentProcess(), REALTIME_PRIORITY_CLASS))
@@ -147,8 +153,6 @@ public:
             }
         }
 #endif
-        // We delay socket creation until Bind or Connect to infer address family
-        sockfd = -1;
 #ifdef WIN32
         // Initialize recv and send functions
         GUID guidWSARecvMsg = WSAID_WSARECVMSG;
@@ -201,8 +205,7 @@ public:
 
         freeaddrinfo(result);
 
-        sockaddr_storage own_addr;
-        memset(&own_addr, 0, sizeof(own_addr));
+        sockaddr_storage own_addr{};
         socklen_t own_len;
 
         if (family == AF_INET) {
@@ -257,6 +260,8 @@ public:
           perror("Connect failed");
           exit(EXIT_FAILURE);
         }
+
+        connected = true;
     }
 
     size_tp Receive(char *buf, size_tp len, ecn_tp &ecn, time_tp timeout)
@@ -305,7 +310,7 @@ public:
             exit(1);
         }
         cmsg = WSA_CMSG_FIRSTHDR(&wsaMsg);
-        while (cmsg != NULL) {
+        while (cmsg != NULL) { // FIXME Should be IP_ECN and IPV6_ECN
             if ((cmsg->cmsg_level == IPPROTO_IP && cmsg->cmsg_type == IP_TOS) ||
                 (cmsg->cmsg_level == IPPROTO_IPV6 && cmsg->cmsg_type == IPV6_TCLASS)) {
                 ecn = ecn_tp(*(PINT)WSA_CMSG_DATA(cmsg));
@@ -360,7 +365,9 @@ public:
         if (!(cmptr->cmsg_level == IPPROTO_IP) && (cmptr->cmsg_type == IP_TOS) &&
             !(cmptr->cmsg_level == IPPROTO_IPV6) && (cmptr->cmsg_type == IPV6_TCLASS)) {
 #else  // other Unix
-        if ((cmptr->cmsg_level != IPPROTO_IP) || (cmptr->cmsg_type != IP_RECVTOS)) {
+
+        if (!(cmptr->cmsg_level == IPPROTO_IP) && (cmptr->cmsg_type == IP_RECVTOS) &&
+            !(cmptr->cmsg_level == IPPROTO_IPV6) && (cmptr->cmsg_type == IPV6_RECVTCLASS)) {
 #endif
             perror("Fail to recv IP.ECN field from packet\n");
             exit(1);
@@ -429,6 +436,7 @@ public:
             }
             current_ecn = ecn;
         }
+
         if (connected)
             rc = send(sockfd, buf, len, 0);
         else
