@@ -36,3 +36,10 @@ udp_prague_sender
 *.out
 *.app
 *.swp
+
+.cache
+
+compile_commands.json
+
+# GoogleTest binary
+run_tests

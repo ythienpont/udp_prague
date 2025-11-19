@@ -5,6 +5,9 @@ SRC=prague_cc.cpp
 HEADERS=prague_cc.h
 CPPFLAGS=-std=c++11 -O3
 WARN=-Wall -Wextra
+TEST_LIBS=third_party/googletest/build/lib/libgtest.a \
+          third_party/googletest/build/lib/libgtest_main.a
+
 
 # Detect MUSL environment (Alpine Linux uses MUSL libc)
 MUSL_DETECTED := $(shell ldd --version 2>&1 | grep -i musl > /dev/null && echo yes || echo no)
@@ -39,6 +42,11 @@ udp_prague_receiver: udp_prague_receiver.cpp $(HEADERS) Makefile lib_prague
 
 udp_prague_sender: udp_prague_sender.cpp $(HEADERS) Makefile lib_prague
 	$(CPP) udp_prague_sender.cpp -L. -lprague $(CPPFLAGS) -pthread -Wall -Wextra -o $@
+
+test: lib_prague tests/test_*.cpp
+	$(CPP) -std=c++17 -Iinclude -Ithird_party/googletest/googletest/include \
+	    tests/test_*.cpp -L. -lprague $(TEST_LIBS) -pthread -o run_tests
+	./run_tests
 
 clean:
 	rm -rf udp_prague_receiver udp_prague_sender *.a *.o
