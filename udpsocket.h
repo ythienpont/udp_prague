@@ -15,9 +15,12 @@
 #elif __linux__
 #include <sched.h>
 #include <string.h>
+#include <stdio.h>
 #include <unistd.h>
+#include <stdlib.h>
 #include <arpa/inet.h>
 #include <netinet/ip.h>
+#include <netdb.h>
 #elif __FreeBSD__
 #include <unistd.h>
 #include <sys/socket.h>
@@ -55,7 +58,7 @@ class UDPSocket {
     LPFN_WSASENDMSG WSASendMsg;
 #endif
     ecn_tp current_ecn;
-    SOCKADDR_IN peer_addr;
+    sockaddr_storage peer_addr;
     socklen_t peer_len;
     SOCKET sockfd;
     bool connected;
@@ -64,7 +67,7 @@ public:
 #ifdef WIN32
         WSARecvMsg(NULL), WSASendMsg(NULL),
 #endif
-        current_ecn(ecn_not_ect), peer_len(sizeof(peer_addr)), connected(false) {
+        current_ecn(ecn_not_ect), connected(false) {
 #ifdef WIN32
         DWORD dwPriClass;
         if (!SetPriorityClass(GetCurrentProcess(), REALTIME_PRIORITY_CLASS))
@@ -108,12 +111,8 @@ public:
             }
         }
 #endif
-
-        sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-        if (int(sockfd) < 0) {
-            perror("Socket creation failed.\n");
-            exit(1);
-        }
+        // We delay socket creation until Bind or Connect to infer address family
+        sockfd = -1;
 #ifdef WIN32
         // Initialize recv and send functions
         GUID guidWSARecvMsg = WSAID_WSARECVMSG;
@@ -137,11 +136,7 @@ public:
             exit(1);
         }
 #else
-        unsigned int set = 1;
-        if (setsockopt(sockfd, IPPROTO_IP, IP_RECVTOS, &set, sizeof(set)) < 0) {
-            perror("setsockopt for IP_RECVTOS failed.\n");
-                exit(1);
-        }
+        // Can't set sock options yet
 #endif
     }
     ~UDPSocket() {
@@ -152,25 +147,94 @@ public:
         sockfd = -1;
 #endif
     }
+
     void Bind(const char* addr, uint32_t port) {
-        // Set server address
-        SOCKADDR_IN own_addr;
-        memset(&own_addr, 0, sizeof(own_addr));
-        own_addr.sin_family = AF_INET;
-        own_addr.sin_addr.S_ADDR = inet_addr(addr);
-        own_addr.sin_port = htons(port);
-        bind(sockfd, (SOCKADDR *)&own_addr, sizeof(own_addr));
+            struct addrinfo hints{}, *result = nullptr;
+
+        hints.ai_family = AF_UNSPEC;    /* Allow IPv4 or IPv6 */
+        hints.ai_socktype = SOCK_DGRAM; /* Datagram socket */
+
+        if (getaddrinfo(addr, nullptr, &hints, &result) != 0) {
+          perror("getaddrinfo failed");
+          exit(EXIT_FAILURE);
+        }
+
+        int family = result->ai_family;
+
+        freeaddrinfo(result);
+
+        sockfd = socket(family, SOCK_DGRAM, 0);
+
+        if (sockfd < 0) {
+            perror("Socket creation failed.\n");
+            exit(1);
+        }
+
+        sockaddr_storage own_addr{};
+        socklen_t own_len;
+
+        if (family == AF_INET) {
+          sockaddr_in* v4 = reinterpret_cast<sockaddr_in*>(&own_addr);
+
+          v4->sin_family = AF_INET;
+          v4->sin_port = htons(port);
+          v4->sin_addr.s_addr = inet_addr(addr);
+        } else {
+          sockaddr_in6* v6 = reinterpret_cast<sockaddr_in6*>(&own_addr);
+          v6->sin6_family = AF_INET6;
+          v6->sin6_port = htons(port);
+          own_len = sizeof(sockaddr_in6);
+
+
+          // Disables dual-stack behaviour
+          // XXX Check if we want this, implementation is platform specific
+          int v6only = 1;
+          setsockopt(sockfd, IPPROTO_IPV6, IPV6_V6ONLY, &v6only, sizeof(v6only));
+        }
+
+        // XXX Set peer length?
+        peer_len = own_len;
+
+        if (bind(sockfd, reinterpret_cast<sockaddr*>(&own_addr), own_len) < 0) {
+          perror("Bind failed");
+          exit(EXIT_FAILURE);
+        }
     }
+
     void Connect(const char* addr, uint32_t port) {
-        // Set server address
-        peer_len = sizeof(peer_addr);
-        memset(&peer_addr, 0, peer_len);
-        peer_addr.sin_family = AF_INET;
-        peer_addr.sin_addr.S_ADDR = inet_addr(addr);
-        peer_addr.sin_port = htons(port);
-        connect(sockfd, (SOCKADDR *)&peer_addr, peer_len);
-        connected = true;
+        struct addrinfo hints{}, *result = nullptr;
+
+        hints.ai_family = AF_UNSPEC;    /* Allow IPv4 or IPv6 */
+        hints.ai_socktype = SOCK_DGRAM; /* Datagram socket */
+
+
+        // Convert port number to a string
+        char portbuf[16];
+        snprintf(portbuf, sizeof(portbuf), "%u", port);
+
+        if (getaddrinfo(addr, portbuf, &hints, &result) != 0) {
+          perror("getaddrinfo failed");
+          exit(EXIT_FAILURE);
+        }
+
+        sockfd = socket(result->ai_family, SOCK_DGRAM, 0);
+
+        if (sockfd < 0) {
+            perror("Socket creation failed.\n");
+            exit(1);
+        }
+
+        memcpy(&peer_addr, result->ai_addr, result->ai_addrlen);
+        peer_len = result->ai_addrlen;
+
+        freeaddrinfo(result);
+
+        if (connect(sockfd, (sockaddr*)&peer_addr, peer_len) < 0) {
+          perror("Connect failed");
+          exit(EXIT_FAILURE);
+        }
     }
+
     size_tp Receive(char *buf, size_tp len, ecn_tp &ecn, time_tp timeout)
     {
 #ifdef WIN32
