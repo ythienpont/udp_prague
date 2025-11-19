@@ -114,7 +114,7 @@ int main(int argc, char **argv)
                 app.LogSendData(now, data_msg.timestamp, data_msg.echoed_timestamp, seqnr, packet_size,
                     pacing_rate, packet_window, packet_burst, inflight, inburst, nextSend);
                 data_msg.hton();
-                app.ExitIf(us.Send((char*)(&data_msg), packet_size, new_ecn) != packet_size, "invalid data packet length sent");
+                app.ExitIf(us.Send((char*)(&data_msg), packet_size, new_ecn) != (ssize_t)packet_size, "invalid data packet length sent");
                 sendtime[seqnr % PKT_BUFFER_SIZE] = startSend;
                 pkts_stat[seqnr % PKT_BUFFER_SIZE] = snd_sent;
                 inburst++;
@@ -167,7 +167,7 @@ int main(int argc, char **argv)
                 app.LogSendFrameData(now, frame_msg.timestamp, frame_msg.echoed_timestamp, seqnr, packet_size,
                     pacing_rate, frame_window, frame_window, packet_burst, frame_inflight, frame_sent, inburst, nextSend);
                 frame_msg.hton();
-                app.ExitIf(us.Send((char*)(&frame_msg), packet_size, new_ecn) != packet_size, "invalid frame packet length sent");
+                app.ExitIf(us.Send((char*)(&frame_msg), packet_size, new_ecn) != (ssize_t)packet_size, "invalid frame packet length sent");
                 sendtime[seqnr % PKT_BUFFER_SIZE] = startSend;
                 pkts_stat[seqnr % PKT_BUFFER_SIZE] = snd_sent;
                 frame_idx[seqnr % PKT_BUFFER_SIZE] = frame_nr;

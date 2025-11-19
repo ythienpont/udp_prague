@@ -44,7 +44,7 @@ int main(int argc, char **argv)
         pragueCC.GetTimeInfo(ack_msg.timestamp, ack_msg.echoed_timestamp, new_ecn);
         pragueCC.GetACKInfo(ack_msg.packets_received, ack_msg.packets_CE, ack_msg.packets_lost, ack_msg.error_L4S);
         ack_msg.set_stat();
-        app.ExitIf(us.Send((char*)(&ack_msg), sizeof(ack_msg), new_ecn) != sizeof(ack_msg), "Invalid ack packet length sent.\n");
+        app.ExitIf(us.Send((char*)(&ack_msg), sizeof(ack_msg), new_ecn) != (ssize_t)sizeof(ack_msg), "Invalid ack packet length sent.\n");
     }
 
     while (true) {
@@ -103,11 +103,11 @@ int main(int argc, char **argv)
                 ack_msg.packets_received, ack_msg.packets_CE, ack_msg.packets_lost, ack_msg.error_L4S);
 
             ack_msg.set_stat();
-            app.ExitIf(us.Send((char*)(&ack_msg), sizeof(ack_msg), new_ecn) != sizeof(ack_msg), "Invalid ack packet length sent.\n");
+            app.ExitIf(us.Send((char*)(&ack_msg), sizeof(ack_msg), new_ecn) != (ssize_t)sizeof(ack_msg), "Invalid ack packet length sent.\n");
         } else if (rfc8888_acktime - now <= 0) {
             while (start_seq != end_seq) {
                 uint16_t rfc8888_acksize = rfc8888_ackmsg.set_stat(start_seq, end_seq, now, recvtime, recvecn, recvseq, app.max_pkt);
-                app.ExitIf(us.Send((char*)(&rfc8888_ackmsg), rfc8888_acksize, ecn_l4s_id) != rfc8888_acksize, "Invalid RFC8888 ack packetlength sent.");
+                app.ExitIf(us.Send((char*)(&rfc8888_ackmsg), rfc8888_acksize, ecn_l4s_id) != (ssize_t)rfc8888_acksize, "Invalid RFC8888 ack packetlength sent.");
                 app.LogSendRFC8888ACK(now, data_msg.seq_nr, rfc8888_acksize,
                     htonl(rfc8888_ackmsg.begin_seq), htons(rfc8888_ackmsg.num_reports), rfc8888_ackmsg.report);
             }

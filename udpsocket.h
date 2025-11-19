@@ -72,12 +72,12 @@ class UDPSocket {
     bool connected;
 
     // Initialize the socket with provided family
-    void init_socket(const int family) {
+    int init_socket(const int family) {
         sockfd = socket(family, SOCK_DGRAM, 0);
 
         if (sockfd < 0) {
             perror("Socket creation failed.\n");
-            exit(EXIT_FAILURE);
+            return -1;
         }
 
         unsigned int set = 1;
@@ -85,24 +85,24 @@ class UDPSocket {
         if (family == AF_INET) {
           if (setsockopt(sockfd, IPPROTO_IP, IP_RECVTOS, &set, sizeof(set)) < 0) {
               perror("setsockopt for IP_RECVTOS failed.\n");
-                  exit(EXIT_FAILURE);
+                  return -1;
           }
         } else {
           if (setsockopt(sockfd, IPPROTO_IPV6, IPV6_RECVTCLASS, &set, sizeof(set)) < 0) {
               perror("setsockopt for IPV6_RECVTCLASS failed.\n");
-                  exit(EXIT_FAILURE);
+                  return -1;
           }
 #ifdef __linux__ 
           // On Apple hosts, the application only sets IPV6_RECVTCLASS; setting IP_RECVTOS will return an error.
           if (IS_DUALSTACK) {
             if (setsockopt(sockfd, IPPROTO_IP, IP_RECVTOS, &set, sizeof(set)) < 0) {
                 perror("setsockopt for IP_RECVTOS failed.\n");
-                    exit(EXIT_FAILURE);
+                return -1;
             }
           }
 #endif
         }
-
+      return 0;
     }
 public:
     UDPSocket() :
@@ -123,7 +123,7 @@ public:
         // Initialize Winsock
         if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
             perror("WSAStartup failed.\n");
-            exit(1);
+            return -1;
         }
 #elif defined(__MUSL__)
         if (geteuid() == 0) {
@@ -188,7 +188,7 @@ public:
 #endif
     }
 
-    void Bind(const char* addr, uint32_t port) {
+    int Bind(const char* addr, uint32_t port) {
         struct addrinfo hints{}, *result = nullptr;
 
         hints.ai_family = AF_UNSPEC;    /* Allow IPv4 or IPv6 */
@@ -196,7 +196,7 @@ public:
 
         if (getaddrinfo(addr, nullptr, &hints, &result) != 0) {
           perror("getaddrinfo failed");
-          exit(EXIT_FAILURE);
+          return -1;
         }
 
         int family = result->ai_family;
@@ -230,11 +230,13 @@ public:
 
         if (bind(sockfd, (sockaddr*)(&own_addr), own_len) < 0) {
           perror("Bind failed");
-          exit(EXIT_FAILURE);
+          return -1;
         }
+
+        return 0;
     }
 
-    void Connect(const char* addr, uint32_t port) {
+    int Connect(const char* addr, uint32_t port) {
         struct addrinfo hints{}, *result = nullptr;
 
         hints.ai_family = AF_UNSPEC;    /* Allow IPv4 or IPv6 */
@@ -246,7 +248,7 @@ public:
 
         if (getaddrinfo(addr, portbuf, &hints, &result) != 0) {
           perror("getaddrinfo failed");
-          exit(EXIT_FAILURE);
+          return -1;
         }
 
         init_socket(result->ai_family);
@@ -258,13 +260,15 @@ public:
 
         if (connect(sockfd, (sockaddr*)&peer_addr, peer_len) < 0) {
           perror("Connect failed");
-          exit(EXIT_FAILURE);
+          return -1;
         }
 
         connected = true;
+
+        return 0;
     }
 
-    size_tp Receive(char *buf, size_tp len, ecn_tp &ecn, time_tp timeout)
+    ssize_t Receive(char *buf, size_tp len, ecn_tp &ecn, time_tp timeout)
     {
 #ifdef WIN32
         int r;
@@ -281,7 +285,7 @@ public:
             if (r < 0) {
                 // select error
                 perror("Select error.\n");
-                exit(1);
+                return -1;
             }
             else if (r == 0) {
                 // Timeout
@@ -307,7 +311,7 @@ public:
         r = WSARecvMsg(sockfd, &wsaMsg, &numBytes, NULL, NULL);
         if (r == SOCKET_ERROR) {
             perror("Fail to recv UDP message from socket.\n");
-            exit(1);
+            return -1;
         }
         cmsg = WSA_CMSG_FIRSTHDR(&wsaMsg);
         while (cmsg != NULL) { // FIXME Should be IP_ECN and IPV6_ECN
@@ -347,7 +351,7 @@ public:
             if (r == SOCKET_ERROR) {
                 // select error
                 perror("Select error.\n");
-                exit(1);
+                return -1;
             }
             else if (r == 0) {
                 // Timeout
@@ -357,7 +361,7 @@ public:
 
         if ((r = recvmsg(sockfd, &rcv_msg, 0)) < 0) {
             perror("Fail to recv UDP message from socket\n");
-            exit(1);
+            return -1;
         }
 
         struct cmsghdr *cmptr = CMSG_FIRSTHDR(&rcv_msg);
@@ -370,7 +374,7 @@ public:
             !(cmptr->cmsg_level == IPPROTO_IPV6) && (cmptr->cmsg_type == IPV6_RECVTCLASS)) {
 #endif
             perror("Fail to recv IP.ECN field from packet\n");
-            exit(1);
+            return -1;
         }
 
         ecn = (ecn_tp)((unsigned char)(*(uint32_t*)CMSG_DATA(cmptr)) & ECN_MASK);
@@ -378,7 +382,7 @@ public:
 #endif
     }
 
-    size_tp Send(char *buf, size_tp len, ecn_tp ecn)
+    ssize_t Send(char *buf, size_tp len, ecn_tp ecn)
     {
         ssize_t rc = -1;
 #ifdef WIN32
@@ -406,7 +410,7 @@ public:
         rc = WSASendMsg(sockfd, &wsaMsg, 0, &numBytes, NULL, NULL);
         if (rc == SOCKET_ERROR) {
             perror("Sent failed.");
-            exit(1);
+            return -1;
         }
         return numBytes;
 #else
@@ -429,7 +433,7 @@ public:
               if (IS_DUALSTACK) {
                 if (setsockopt(sockfd, IPPROTO_IP, IP_TOS, &ecn_set, sizeof(ecn_set)) < 0) {
                     perror("setsockopt for IP_RECVTOS failed.\n");
-                        exit(EXIT_FAILURE);
+                        return -1;
                 }
               }
 #endif
@@ -443,7 +447,7 @@ public:
             rc = sendto(sockfd, buf, len, 0, (SOCKADDR *) &peer_addr, peer_len);
         if (rc < 0) {
             perror("Sent failed.");
-            exit(1);
+            return -1;
         }
         return size_tp(rc);
 #endif
