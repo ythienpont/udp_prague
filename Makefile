@@ -5,8 +5,8 @@ SRC=prague_cc.cpp
 HEADERS=prague_cc.h
 CPPFLAGS=-std=c++11 -O3
 WARN=-Wall -Wextra
-TEST_LIBS=third_party/googletest/build/lib/libgtest.a \
-          third_party/googletest/build/lib/libgtest_main.a
+TEST_LIBS=third_party/googletest/lib/libgtest.a \
+          third_party/googletest/lib/libgtest_main.a
 
 
 # Detect MUSL environment (Alpine Linux uses MUSL libc)
