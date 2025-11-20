@@ -195,6 +195,7 @@ public:
         hints.ai_socktype = SOCK_DGRAM; /* Datagram socket */
 
         if (getaddrinfo(addr, nullptr, &hints, &result) != 0) {
+          freeaddrinfo(result);
           perror("getaddrinfo failed");
           exit(EXIT_FAILURE);
         }
@@ -245,6 +246,7 @@ public:
         snprintf(portbuf, sizeof(portbuf), "%u", port);
 
         if (getaddrinfo(addr, portbuf, &hints, &result) != 0) {
+          freeaddrinfo(result);
           perror("getaddrinfo failed");
           exit(EXIT_FAILURE);
         }
