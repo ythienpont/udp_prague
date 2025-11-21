@@ -1,6 +1,21 @@
-#include <algorithm>
 #include <chrono>
 #include "prague_cc.h"
+
+// Define our own constexpr in favor of <algorithm>
+template <typename T>
+constexpr inline const T& min(const T& a, const T& b) {
+  return (b < a) ? b : a;
+}
+
+template <typename T>
+constexpr inline const T& max(const T& a, const T& b) {
+  return (a < b) ? b : a;
+}
+
+template <typename T>
+constexpr inline const T& clamp(const T& v, const T& lo, const T& hi) {
+  return (v < lo) ? lo : (hi < v ? hi : v);
+}
 
 // CUBIC consts and helpers
 
@@ -180,7 +195,7 @@ PragueCC::PragueCC(
     m_max_rate = max_rate;
     m_max_packet_size = max_packet_size;
     m_frame_interval = fps ? 1000000 / fps : 0;
-    m_frame_budget = std::min(frame_budget, m_frame_interval);
+    m_frame_budget = min(frame_budget, m_frame_interval);
 // both end variables
     m_ts_remote = 0;    // to keep the frozen timestamp from the peer, and echo it back defrosted
     m_rtt = 0;          // last reported rtt (only for stats)
@@ -231,13 +246,13 @@ PragueCC::PragueCC(
     m_fractional_window = m_init_window;
 
     // B/p = B/s * 25ms/burst / 2p/window
-    m_packet_size = std::clamp(PRAGUE_MINMTU,
-                                m_pacing_rate * REF_RTT / 1000000 / MIN_PKT_WIN,
+    m_packet_size = clamp(m_pacing_rate * REF_RTT / 1000000 / MIN_PKT_WIN,
+                                PRAGUE_MINMTU,
                                 m_max_packet_size);
     // p = B/s * 250µs / B/p
-    m_packet_burst = std::max(MIN_PKT_BURST, count_tp(m_pacing_rate * BURST_TIME / 1000000 / m_packet_size));
+    m_packet_burst = max(MIN_PKT_BURST, count_tp(m_pacing_rate * BURST_TIME / 1000000 / m_packet_size));
 
-    m_packet_window = std::max(MIN_PKT_WIN, count_tp((m_fractional_window / 1000000 + m_packet_size - 1) / m_packet_size));
+    m_packet_window = max(MIN_PKT_WIN, count_tp((m_fractional_window / 1000000 + m_packet_size - 1) / m_packet_size));
 }
 
 PragueCC::~PragueCC()
@@ -247,11 +262,11 @@ bool PragueCC::RFC8888Received(size_t num_rtt, time_tp *pkts_rtt)
 {
     for (size_t i = 0; i < num_rtt; i++) {
         m_rtt = pkts_rtt[i];
-        m_rtt_min = std::min(m_rtt_min, m_rtt);
+        m_rtt_min = min(m_rtt_min, m_rtt);
 
         m_srtt = (m_cc_state == cs_init) ? m_rtt : m_srtt + ((m_rtt - m_srtt) >> 3); // smooth with EWMA of 1/8th
 
-        m_vrtt = std::max(m_srtt, REF_RTT);
+        m_vrtt = max(m_srtt, REF_RTT);
     }
 
     return true;
@@ -268,12 +283,12 @@ bool PragueCC::PacketReceived(         // call this when a packet is received fr
     time_tp ts = Now();
     m_ts_remote = ts - timestamp;  // freeze the remote timestamp
     m_rtt = ts - echoed_timestamp; // calculate the new rtt sample
-    m_rtt_min = std::min(m_rtt, m_rtt_min); // keep track of the minimum rtt
+    m_rtt_min = min(m_rtt, m_rtt_min); // keep track of the minimum rtt
 
     m_srtt = (m_cc_state != cs_init) ? m_srtt + ((m_rtt - m_srtt) >> 3) // smooth with EWMA of 1/8th
                                       : m_rtt;
 
-    m_vrtt = std::max(m_srtt, REF_RTT); // calculate the virtual RTT (if srtt < 25ms reference RTT)
+    m_vrtt = max(m_srtt, REF_RTT); // calculate the virtual RTT (if srtt < 25ms reference RTT)
     m_r_prev_ts = timestamp;
     return true;
 }
@@ -347,7 +362,7 @@ bool PragueCC::ACKReceived(    // call this when an ACK is received from peer. R
         }
 
         m_rtts_to_growth -= m_lost_rtts_to_growth; // restore the rtts to growth
-        m_rtts_to_growth = std::max(m_rtts_to_growth, 0); // always positive
+        m_rtts_to_growth = max(m_rtts_to_growth, 0); // always positive
         m_lost_rtts_to_growth = 0;                 // clear all lost growth rtts
         m_cc_state = cs_cong_avoid;                // restore the loss state
     }
@@ -626,7 +641,7 @@ void PragueCC::GetCCInfoVideo( // when the sending app needs to send a frame
     frame_size = (m_packet_size > m_pacing_rate * m_frame_budget / 1000000) ? (m_packet_size) : (m_pacing_rate * m_frame_budget / 1000000);
     frame_window = m_packet_window * m_packet_size / frame_size;
 
-    frame_window = std::max(frame_window, MIN_FRAME_WIN);
+    frame_window = max(frame_window, MIN_FRAME_WIN);
 }
 
 void PragueCC::GetACKInfo(       // when the receiving-app needs to send a packet
