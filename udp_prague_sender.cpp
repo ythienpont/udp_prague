@@ -7,11 +7,31 @@
 //#include "icmpsocket.h" TODO: optimize MTU detection
 #include "app_stuff.h"
 #include "pkt_format.h"
+#include <exception>
 
 #define MAX_TIMEOUT      2    // Maximum number of timeouts before exiting
 
+
+void terminate_handler1() {
+  if (auto eptr = std::current_exception()) {
+    try {
+      std::rethrow_exception(eptr);
+    }
+    catch (const std::exception& e) {
+      std::cerr << "Unhandled exception: "
+        << typeid(e).name()
+        << "\nwhat(): " << e.what() 
+        << std::endl;
+    } catch (...) {
+      std::cerr << "Unhandled non-std exception" << std::endl;
+    }
+  }
+  std::abort();
+}
+
 int main(int argc, char **argv)
 {
+  std::set_terminate(terminate_handler1);
     AppStuff app(true, argc, argv); // initialize the app
 
     // Create a UDP socket
@@ -104,6 +124,7 @@ int main(int argc, char **argv)
         count_tp inburst = 0;   // packets in-burst counter
         time_tp startSend = 0;  // next time to send
         now = pragueCC.Now();
+
         if (!app.rt_mode) {
             // if the window and pacing interval allows, send the next burst
             while ((inflight < packet_window) && (inburst < packet_burst) && (nextSend - now <= 0)) {
@@ -204,10 +225,12 @@ int main(int argc, char **argv)
             waitTimeout = now + SND_TIMEOUT;
         else if (app.rt_mode && frame_inflight >= frame_window)
             waitTimeout = now + SND_TIMEOUT;
+
         do {
             bytes_received = us.Receive(receivebuffer, sizeof(receivebuffer), rcv_ecn, (waitTimeout - now > 0) ? (waitTimeout - now) : 1);
             now = pragueCC.Now();
         } while ((bytes_received == 0) && (waitTimeout - now > 0));
+
         if (receivebuffer[0] == PKT_ACK_TYPE && bytes_received >= ssize_t(sizeof(ack_msg))) {
             if (!app.rt_mode) {
                 ack_msg.get_stat(pkts_stat, pkts_lost);

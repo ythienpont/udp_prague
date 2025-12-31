@@ -2,13 +2,32 @@
 // An example of a (dummy data) UDP receiver that needs to send ACKs for a congestion controlled UDP sender
 //
 
+#include <exception>
 #include <string>
 #include "udpsocket.h"
 #include "app_stuff.h"
 #include "pkt_format.h"
 
+void terminate_handler1() {
+  if (auto eptr = std::current_exception()) {
+    try {
+      std::rethrow_exception(eptr);
+    }
+    catch (const std::exception& e) {
+      std::cerr << "Unhandled exception: "
+        << typeid(e).name()
+        << "\nwhat(): " << e.what() 
+        << std::endl;
+    } catch (...) {
+      std::cerr << "Unhandled non-std exception" << std::endl;
+    }
+  }
+  std::abort();
+}
+
 int main(int argc, char **argv)
 {
+  std::set_terminate(terminate_handler1);
     AppStuff app(false, argc, argv); // initialize the app
 
     // Create a UDP socket

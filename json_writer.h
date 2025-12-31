@@ -6,8 +6,10 @@
 //
 
 // Below are only been tested in Linux
+#ifndef _WIN32
 #include <unistd.h>
 #include <sys/file.h>
+#endif
 
 #include <string>
 #define INIT_CAPACITY 128
@@ -48,10 +50,12 @@ struct json_writer {
     }
 
     int remove_file_if_exists(const char *filename) {
+#ifndef _WIN32
         // Return 0 if file does not exis or file can be removed
         if (access(filename, F_OK) != 0 ||
             remove(filename) == 0)
                 return 0;
+#endif
         return -1;
     }
 
@@ -278,6 +282,7 @@ struct json_writer {
     }
 
     int dumpfile() {
+#ifndef _WIN32
         FILE *file = NULL;
         if (!file_name || !buffer)
             return -1;
@@ -300,6 +305,7 @@ struct json_writer {
         fflush(file);
         flock(fd, LOCK_UN);
         fclose(file);
+#endif
         return 0;
     }
 
