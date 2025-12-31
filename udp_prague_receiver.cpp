@@ -7,6 +7,7 @@
 #include "udpsocket.h"
 #include "app_stuff.h"
 #include "pkt_format.h"
+#include <iostream>
 
 void terminate_handler1() {
   if (auto eptr = std::current_exception()) {

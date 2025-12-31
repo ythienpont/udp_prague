@@ -8,6 +8,7 @@
 #include "app_stuff.h"
 #include "pkt_format.h"
 #include <exception>
+#include <iostream>
 
 #define MAX_TIMEOUT      2    // Maximum number of timeouts before exiting
 

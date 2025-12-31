@@ -3,7 +3,6 @@
 #include <cassert>
 #include <cstring>
 #include <system_error>
-#include <winsock2.h>
 
 SocketHandle invalid_socket() {
 #ifdef _WIN32
@@ -101,7 +100,7 @@ bool wait_for_readable(SocketHandle s, time_tp timeout) {
   tv.tv_sec = static_cast<long>(timeout / 1000000);
   tv.tv_usec = static_cast<long>(timeout % 1000000);
 
-  int r = select((INT)s + 1, &recvsds, NULL, NULL, &tv);
+  int r = select(s + 1, &recvsds, NULL, NULL, &tv);
 
   if (r == SOCKET_ERROR)
     throw std::system_error(last_error_code(), std::system_category(),
@@ -203,7 +202,7 @@ size_t recv_with_ecn(SocketHandle s, Endpoint &peer, char *buf, size_t len,
   rcv_iov[0].iov_base = buf;
 
   rcv_msg.msg_name = &peer.sa;
-  rcv_msg.msg_namelen = peer.len;
+  rcv_msg.msg_namelen = sizeof(peer.sa);
   rcv_msg.msg_iov = rcv_iov;
   rcv_msg.msg_iovlen = 1;
   rcv_msg.msg_control = ctrl_msg;
@@ -213,6 +212,8 @@ size_t recv_with_ecn(SocketHandle s, Endpoint &peer, char *buf, size_t len,
     perror("Fail to recv UDP message from socket\n");
     exit(1);
   }
+
+  peer.len = static_cast<socklen_t>(rcv_msg.msg_namelen);
 
   struct cmsghdr *cmptr = CMSG_FIRSTHDR(&rcv_msg); // TODO Loop instead
 #ifdef __linux__
@@ -229,7 +230,7 @@ size_t recv_with_ecn(SocketHandle s, Endpoint &peer, char *buf, size_t len,
   }
 
   ecn = (ecn_tp)((unsigned char)(*(uint32_t *)CMSG_DATA(cmptr)) & ECN_MASK);
-  return r;
+  return static_cast<size_tp>(r);
 }
 #endif
 
@@ -428,21 +429,26 @@ size_tp UDPSocket::Send(char *buf, size_tp len, ecn_tp ecn) {
 
   return static_cast<size_t>(numBytes);
 #else
+  int rc;
   // TODO switch to per packet instead of sockopt
   if (current_ecn != ecn) {
     unsigned int ecn_set = ecn;
 
-    if (peer.is_v4()) { // Check for IPv4
-      if (setsockopt(sock, IPPROTO_IP, IP_TOS, &ecn_set, sizeof(ecn_set)) < 0) {
-        printf("Could not apply ecn %d,\n", ecn);
-        return -1;
-      }
-    } else {
+    switch (peer.family()) {
+    case AF_INET:
+      if (setsockopt(sock, IPPROTO_IP, IP_TOS, &ecn_set, sizeof(ecn_set)) < 0)
+        throw std::system_error(last_error_code(), std::system_category(),
+                                "setsockopt(IP_TOS)");
+      break;
+    case AF_INET6:
       if (setsockopt(sock, IPPROTO_IPV6, IPV6_TCLASS, &ecn_set,
-                     sizeof(ecn_set)) < 0) {
-        printf("Could not apply ecn %d,\n", ecn);
-        return -1;
-      }
+                     sizeof(ecn_set)) < 0)
+        throw std::system_error(last_error_code(), std::system_category(),
+                                "setsockopt(IPV6_TCLASS)");
+      break;
+    default:
+      throw std::system_error(EAFNOSUPPORT, std::system_category(),
+                              "Unsupported address family");
     }
     current_ecn = ecn;
   }
@@ -450,7 +456,7 @@ size_tp UDPSocket::Send(char *buf, size_tp len, ecn_tp ecn) {
   if (connected)
     rc = send(sock, buf, len, 0);
   else
-    rc = sendto(sock, buf, len, 0, (SOCKADDR *)&peer.sa, peer.len);
+    rc = sendto(sock, buf, len, 0, (sockaddr *)&peer.sa, peer.len);
   if (rc < 0) {
     perror("Sent failed.");
     exit(1);

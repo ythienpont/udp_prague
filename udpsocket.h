@@ -6,7 +6,6 @@
 
 #include <winsock2.h>
 
-#include <iostream>
 #include <mstcpip.h>
 #include <mswsock.h>
 #include <ws2ipdef.h>
@@ -50,7 +49,7 @@ struct Endpoint {
   socklen_t len{0};
   bool is_v4() const { return sa.ss_family == AF_INET; }
   bool is_v6() const { return sa.ss_family == AF_INET6; }
-  int family() const {return sa.ss_family; }
+  int family() const { return sa.ss_family; }
 };
 
 using SocketHandle =
@@ -60,10 +59,11 @@ using SocketHandle =
     int;
 #endif
 
-#ifndef _WIN32
-constexpr int SOCKET_ERROR = -1;
-#else
+#ifdef _WIN32
 typedef int ssize_t;
+#else
+constexpr int SOCKET_ERROR = -1;
+#define ECN_MASK ecn_ce
 #endif
 
 void set_max_priority();
