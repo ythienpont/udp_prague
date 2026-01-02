@@ -2,8 +2,6 @@
 #define UDPSOCKET_H
 
 #ifdef _WIN32
-// #define _WINSOCK_DEPRECATED_NO_WARNINGS
-
 #include <winsock2.h>
 
 #include <mstcpip.h>
@@ -42,16 +40,17 @@
 #endif
 #include "prague_cc.h"
 
-#define IS_DUALSTACK 1
-
+// Holds a resolved socket address (IPv4 or IPv6) and its length.
 struct Endpoint {
   sockaddr_storage sa{};
   socklen_t len{0};
+
   bool is_v4() const { return sa.ss_family == AF_INET; }
   bool is_v6() const { return sa.ss_family == AF_INET6; }
   int family() const { return sa.ss_family; }
 };
 
+// Platform-abstracted socket type (SOCKET on Windows, else int).
 using SocketHandle =
 #ifdef _WIN32
     SOCKET;
@@ -66,60 +65,52 @@ constexpr int SOCKET_ERROR = -1;
 #define ECN_MASK ecn_ce
 #endif
 
-void set_max_priority();
-
-SocketHandle invalid_socket();
-bool is_socket_valid(SocketHandle s);
-void close_socket(SocketHandle s);
-
-SocketHandle make_udp_socket(int family);
-
-void enable_recv_ecn(SocketHandle s, int family);
-
-void set_send_ecn(SocketHandle s, const Endpoint &ep, ecn_tp ecn);
-
-Endpoint resolve_endpoint(const char *addr, uint16_t port);
-
-#ifdef _WIN32
-size_t recv_with_ecn_windows(LPFN_WSARECVMSG WSARecvMsg, SocketHandle s,
-                             Endpoint &peer, char *buf, size_t len,
-                             ecn_tp &ecn);
-#else
-size_t recv_with_ecn(SocketHandle s, Endpoint &peer, char *buf, size_t len,
-                     ecn_tp &ecn);
-#endif
-
-size_t send_with_ecn(SocketHandle s, const Endpoint &ep, const char *buf,
-                     size_t len, ecn_tp ecn, bool connected);
-
-int last_error_code();
-
-bool wait_for_readable(SocketHandle s, time_tp timeout);
-
+// High-level UDP socket wrapper
 class UDPSocket {
-
 public:
+  /**
+   * Construct a UDPSocket, initializes platform state and attempt to raise
+   * priority. On Windows, calls WSAStartup. The socket is not created until
+   * Bind/Connect.
+   */
   UDPSocket();
+
+  /**
+   * @brief Destroy the UDPSocket, closing any open socket and cleaning up
+   * platform state. On Windows, calls WSACleanup.
+   */
   ~UDPSocket();
 
+  // Bind the socket to a local address and port and enable ECN
   void Bind(const char *addr, uint16_t port);
+  // Connect the socket to a remote peer and enable ECN
   void Connect(const char *addr, uint16_t port);
 
+  // Receive data with optional timeout and extract ECN from the incoming packet
   size_tp Receive(char *buf, size_tp len, ecn_tp &ecn, time_tp timeout);
+  // Send data to the connected peer (or to peer set by Bind/Connect) with ECN
   size_tp Send(char *buf, size_tp len, ecn_tp ecn);
 
 private:
+  /**
+   * Initialize platform-specific I/O extensions
+   * (Windows: load WSARecvMsg/WSASendMsg)
+   */
   void init_io();
 
 private:
 #ifdef _WIN32
-  WSADATA wsaData;
-  LPFN_WSARECVMSG WSARecvMsg = NULL;
-  LPFN_WSASENDMSG WSASendMsg = NULL;
+  WSADATA wsaData;                   // Winsock state data
+  LPFN_WSARECVMSG WSARecvMsg = NULL; // Pointer to WSARecvMsg extension function
+  LPFN_WSASENDMSG WSASendMsg = NULL; // Pointer to WSASendMsg extension function
 #endif
   SocketHandle sock;
   Endpoint peer{};
+
+  // Whether the socket is connected to a specific peer
   bool connected;
+
+  // Last ECN that was set to avoid redundant setsockopts (non-Windows)
   ecn_tp current_ecn;
 };
 

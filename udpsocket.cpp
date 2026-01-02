@@ -4,6 +4,7 @@
 #include <cstring>
 #include <system_error>
 
+// Return an invalid socket handle for the current platform
 SocketHandle invalid_socket() {
 #ifdef _WIN32
   return INVALID_SOCKET;
@@ -12,6 +13,7 @@ SocketHandle invalid_socket() {
 #endif
 }
 
+// Check if a handle represents a valid socket on the current platform
 bool is_socket_valid(SocketHandle s) {
 #ifdef _WIN32
   return s != INVALID_SOCKET;
@@ -20,6 +22,7 @@ bool is_socket_valid(SocketHandle s) {
 #endif
 }
 
+// Close a socket handle if it is valid
 void close_socket(SocketHandle s) {
   if (is_socket_valid(s)) {
 #ifdef _WIN32
@@ -30,6 +33,7 @@ void close_socket(SocketHandle s) {
   }
 }
 
+// Retrieve the last OS-specific socket error code
 int last_error_code() {
 #ifdef _WIN32
   return WSAGetLastError();
@@ -38,8 +42,8 @@ int last_error_code() {
 #endif
 }
 
+// Elevate process/thread priority to maximize scheduling responsiveness.
 void set_max_priority() {
-// Set priority
 #ifdef _WIN32
   DWORD dwPriClass;
   if (!SetPriorityClass(GetCurrentProcess(), REALTIME_PRIORITY_CLASS))
@@ -81,6 +85,7 @@ void set_max_priority() {
 #endif
 }
 
+// Wait for a socket to become readable within a timeout
 bool wait_for_readable(SocketHandle s, time_tp timeout) {
   assert(is_socket_valid(s));
   assert(timeout >= 0);
@@ -109,7 +114,8 @@ bool wait_for_readable(SocketHandle s, time_tp timeout) {
   return r > 0;
 }
 
-SocketHandle make_udp_socket(int family) {
+// Create an IPv4 or IPv6 datagram socket
+SocketHandle make_socket(int family) {
   if (!(family == AF_INET || family == AF_INET6)) {
     throw std::system_error(EAFNOSUPPORT, std::system_category(),
                             "Unsupported address family");
@@ -124,6 +130,7 @@ SocketHandle make_udp_socket(int family) {
   return s;
 }
 
+// Enable receiving ECN (TOS/TCLASS) on a datagram socket
 void enable_recv_ecn(SocketHandle s, int family) {
   assert(is_socket_valid(s));
   assert(family == AF_INET || family == AF_INET6);
@@ -157,6 +164,7 @@ void enable_recv_ecn(SocketHandle s, int family) {
 #endif
 }
 
+// Resolve a numeric IPv4 or IPv6 address string and port into an Endpoint
 Endpoint resolve_endpoint(const char *addr, uint16_t port) {
   Endpoint ep{};
 
@@ -191,8 +199,8 @@ Endpoint resolve_endpoint(const char *addr, uint16_t port) {
 }
 
 #ifndef _WIN32
-size_t recv_with_ecn(SocketHandle s, Endpoint &peer, char *buf, size_t len,
-                     ecn_tp &ecn) {
+size_t recv_with_ecn(SocketHandle s, Endpoint &peer, const char *buf,
+                     size_t len, ecn_tp &ecn) {
   int r;
   char ctrl_msg[CMSG_SPACE(sizeof(ecn))];
 
@@ -286,8 +294,12 @@ size_t recv_with_ecn_windows(LPFN_WSARECVMSG WSARecvMsg, SocketHandle s,
 void UDPSocket::Bind(const char *addr, uint16_t port) {
   assert(addr != nullptr);
 
+  // Clean up on re-bind
+  if (is_socket_valid(sock))
+    close_socket(sock);
+
   Endpoint ep = resolve_endpoint(addr, port);
-  sock = make_udp_socket(ep.sa.ss_family);
+  sock = make_socket(ep.sa.ss_family);
   init_io();
   enable_recv_ecn(sock, ep.sa.ss_family);
 
@@ -299,8 +311,12 @@ void UDPSocket::Bind(const char *addr, uint16_t port) {
 void UDPSocket::Connect(const char *addr, uint16_t port) {
   assert(addr != nullptr);
 
+  // Clean up on re-connect
+  if (is_socket_valid(sock))
+    close_socket(sock);
+
   peer = resolve_endpoint(addr, port);
-  sock = make_udp_socket(peer.sa.ss_family);
+  sock = make_socket(peer.sa.ss_family);
   init_io();
   enable_recv_ecn(sock, peer.sa.ss_family);
 
