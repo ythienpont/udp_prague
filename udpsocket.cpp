@@ -199,8 +199,8 @@ Endpoint resolve_endpoint(const char *addr, uint16_t port) {
 }
 
 #ifndef _WIN32
-size_t recv_with_ecn(SocketHandle s, Endpoint &peer, const char *buf,
-                     size_t len, ecn_tp &ecn) {
+size_t recv_with_ecn(SocketHandle s, Endpoint &peer, char *buf, size_t len,
+                     ecn_tp &ecn) {
   int r;
   char ctrl_msg[CMSG_SPACE(sizeof(ecn))];
 
