@@ -30,7 +30,6 @@
 #include <sched.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
 #endif
@@ -58,13 +57,6 @@ using SocketHandle =
     int;
 #endif
 
-#ifdef _WIN32
-typedef int ssize_t;
-#else
-constexpr int SOCKET_ERROR = -1;
-#define ECN_MASK ecn_ce
-#endif
-
 // High-level UDP socket wrapper
 class UDPSocket {
 public:
@@ -76,7 +68,7 @@ public:
   UDPSocket();
 
   /**
-   * @brief Destroy the UDPSocket, closing any open socket and cleaning up
+   * Destroy the UDPSocket, closing any open socket and cleaning up
    * platform state. On Windows, calls WSACleanup.
    */
   ~UDPSocket();
@@ -103,15 +95,30 @@ private:
   WSADATA wsaData;                   // Winsock state data
   LPFN_WSARECVMSG WSARecvMsg = NULL; // Pointer to WSARecvMsg extension function
   LPFN_WSASENDMSG WSASendMsg = NULL; // Pointer to WSASendMsg extension function
+
+  WSABUF dataBuf;
+
+  CHAR sendControl[WSA_CMSG_SPACE(sizeof(INT))] = {0};
+  WSABUF sendControlBuf;
+  WSAMSG sendMsg;
+
+  CHAR recvControl[WSA_CMSG_SPACE(sizeof(INT))] = {0};
+  WSABUF recvControlBuf;
+  WSAMSG recvMsg;
+#else
+  msghdr send_msg{};
+  iovec send_iov{};
+  alignas(cmsghdr) char send_ctrl[CMSG_SPACE(sizeof(int))];
+
+  msghdr recv_msg{};
+  iovec recv_iov{};
+  alignas(cmsghdr) char recv_ctrl[CMSG_SPACE(sizeof(int))];
 #endif
   SocketHandle sock;
   Endpoint peer{};
 
   // Whether the socket is connected to a specific peer
   bool connected;
-
-  // Last ECN that was set to avoid redundant setsockopts (non-Windows)
-  ecn_tp current_ecn;
 };
 
 #endif // UDPSOCKET_H
