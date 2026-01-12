@@ -17,9 +17,7 @@
 #define IPV6_RECV_CMSG_TYPE IPV6_RECVTCLASS
 #endif
 
-#ifdef _WIN32
-typedef int ssize_t;
-#else
+#ifndef _WIN32
 constexpr int SOCKET_ERROR = -1;
 #define ECN_MASK ecn_ce
 #endif
@@ -218,7 +216,28 @@ Endpoint resolve_endpoint(const char *addr, uint16_t port) {
                           "Unsupported address type");
 }
 
-#ifndef _WIN32
+#ifdef _WIN32
+
+bool parse_ecn_cmsg(PCMSGHDR c, ecn_tp &ecn) {
+  if (c->cmsg_level == IPPROTO_IP && c->cmsg_type == IP_ECN) {
+    ecn = ecn_tp(*(PINT)WSA_CMSG_DATA(c));
+    return true;
+  }
+
+  if (c->cmsg_level == IPPROTO_IPV6 && c->cmsg_type == IPV6_ECN) {
+    ecn = ecn_tp(*(PINT)WSA_CMSG_DATA(c));
+    return true;
+  }
+
+  return false;
+}
+void fill_ecn_cmsg(PCMSGHDR c, int family, ecn_tp ecn) {
+  c->cmsg_len = WSA_CMSG_LEN(sizeof(INT));
+  c->cmsg_level = (family == AF_INET) ? IPPROTO_IP : IPPROTO_IPV6;
+  c->cmsg_type = (family == AF_INET) ? IP_ECN : IPV6_ECN;
+  *(PINT)WSA_CMSG_DATA(c) = ecn;
+}
+#else
 // ECN is stored in the low 2 bits of the IP TOS (IPv4) or Traffic Class (IPv6).
 ecn_tp decode_ecn(int tos_or_tc) {
   return static_cast<ecn_tp>(tos_or_tc & ECN_MASK);
@@ -296,7 +315,10 @@ void UDPSocket::Connect(const char *addr, uint16_t port) {
 
   connected = true;
 #ifdef _WIN32
-
+  recvMsg.name = nullptr;
+  recvMsg.namelen = 0;
+  sendMsg.name = nullptr;
+  sendMsg.namelen = 0;
 #else
   recv_msg.msg_name = nullptr;
   recv_msg.msg_namelen = 0;
@@ -392,12 +414,20 @@ size_tp UDPSocket::Receive(char *buf, size_tp len, ecn_tp &ecn,
     return 0;
 
 #ifdef _WIN32
+  DWORD numBytes;
+  INT error;
+
   PCMSGHDR cmsg;
 
   dataBuf.buf = buf;
   dataBuf.len = ULONG(len);
 
-  error = WSARecvMsg(s, &recvMsg, &numBytes, NULL, NULL);
+  if (!connected) {
+    recvMsg.name = (PSOCKADDR)(&peer.sa);
+    recvMsg.namelen = sizeof(peer.sa);
+  }
+
+  error = WSARecvMsg(sock, &recvMsg, &numBytes, NULL, NULL);
 
   if (error == SOCKET_ERROR)
     throw std::system_error(last_error_code(), std::system_category(),
@@ -407,11 +437,8 @@ size_tp UDPSocket::Receive(char *buf, size_tp len, ecn_tp &ecn,
 
   cmsg = WSA_CMSG_FIRSTHDR(&recvMsg);
   while (cmsg != NULL) {
-    if ((cmsg->cmsg_level == IPPROTO_IP && cmsg->cmsg_type == IP_ECN) ||
-        (cmsg->cmsg_level == IPPROTO_IPV6 && cmsg->cmsg_type == IPV6_ECN)) {
-      ecn = ecn_tp(*(PINT)WSA_CMSG_DATA(cmsg));
+    if (parse_ecn_cmsg(cmsg, ecn))
       break;
-    }
     cmsg = WSA_CMSG_NXTHDR(&recvMsg, cmsg);
   }
 
@@ -474,10 +501,7 @@ size_tp UDPSocket::Send(char *buf, size_tp len, ecn_tp ecn) {
   }
 
   cmsg = WSA_CMSG_FIRSTHDR(&sendMsg);
-  cmsg->cmsg_len = WSA_CMSG_LEN(sizeof(INT));
-  cmsg->cmsg_level = (peer.sa.ss_family == AF_INET) ? IPPROTO_IP : IPPROTO_IPV6;
-  cmsg->cmsg_type = (peer.sa.ss_family == AF_INET) ? IP_ECN : IPV6_ECN;
-  *(PINT)WSA_CMSG_DATA(cmsg) = ecn;
+  fill_ecn_cmsg(cmsg, peer.family(), ecn);
 
   error = WSASendMsg(sock, &sendMsg, 0, &numBytes, NULL, NULL);
 

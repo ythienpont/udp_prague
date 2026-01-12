@@ -39,6 +39,10 @@
 #endif
 #include "prague_cc.h"
 
+#ifdef _WIN32
+typedef int ssize_t;
+#endif
+
 // Holds a resolved socket address (IPv4 or IPv6) and its length.
 struct Endpoint {
   sockaddr_storage sa{};
