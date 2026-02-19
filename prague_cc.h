@@ -200,5 +200,12 @@ public:
   {
     return this; // gives a const pointer for reading the live state
   }
+
+private:
+  inline void updateAlpha(time_tp now, count_tp packets_sent,
+                          count_tp packets_received, count_tp packets_CE);
+  inline void reduceOnLoss(time_tp now, count_tp packets_sent);
+  inline void restoreReduction();
+  inline void applyIncrease(time_tp srtt, count_tp acks);
 };
 #endif // PRAGUE_CC_H
