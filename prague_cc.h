@@ -52,67 +52,68 @@ struct PragueState {
   // Parameters
 
   // Used to have a start time of 0
-  TimeUs m_start_ref;
+  TimeUs start_ref_;
 
-  RateBps m_init_rate;
-  FracWindowUB m_init_window;
-  RateBps m_min_rate;
-  RateBps m_max_rate;
-  SizeB m_max_packet_size;
-  TimeUs m_frame_interval;
-  TimeUs m_frame_budget;
+  RateBps init_rate_;
+  FracWindowUB init_window_;
+  RateBps min_rate_;
+  RateBps max_rate_;
+  SizeB max_packet_size_;
+  TimeUs frame_interval_;
+  TimeUs frame_budget_;
 
   // Both-end variables
-  TimeUs m_ts_remote; // to keep the frozen timestamp from the peer, and echo
-                      // it back defrosted
-  TimeUs m_rtt;       // last reported rtt (only for stats)
-  TimeUs m_srtt; // our own measured and smoothed RTT (smoothing factor = 1/8)
-  TimeUs m_vrtt; // our own virtual RTT = max(srtt, 25ms)
+  TimeUs ts_remote_; // to keep the frozen timestamp from the peer, and echo
+                     // it back defrosted
+  TimeUs rtt_;       // last reported rtt (only for stats)
+  TimeUs srtt_; // our own measured and smoothed RTT (smoothing factor = 1/8)
+  TimeUs vrtt_; // our own virtual RTT = max(srtt, 25ms)
 
   // Receiver-end variables (to be echoed to sender)
-  TimeUs m_r_prev_ts; // used to see if an ack isn't older than the previous ack
-  Count m_r_packets_received; // as a receiver, keep counters to echo back
-  Count m_r_packets_CE;
-  Count m_r_packets_lost;
-  bool m_r_error_L4S; // as a receiver, check L4S-ECN validity to echo back an
-                      // error
-                      // sender-end variables
-  TimeUs m_cc_ts;
-  Count m_packets_received; // latest known receiver end counters
-  Count m_packets_CE;
-  Count m_packets_lost;
-  Count m_packets_sent;
-  bool m_error_L4S; // latest known receiver-end error state
+  TimeUs r_prev_ts_; // used to see if an ack isn't older than the previous ack
+  Count r_packets_received_; // as a receiver, keep counters to echo back
+  Count r_packets_marked_;
+  Count r_packets_lost_;
+  bool r_error_L4S_; // as a receiver, check L4S-ECN validity to echo back an
+                     // error
+                     // sender-end variables
+  TimeUs last_cc_update_;
+  Count packets_received_; // latest known receiver end counters
+  Count packets_marked_;
+  Count packets_lost_;
+  Count packets_sent_;
+  bool error_L4S_; // latest known receiver-end error state
 
   // For alpha calculation, keep the previous alpha variables' state
-  TimeUs m_alpha_ts;
-  Count m_alpha_packets_received;
-  Count m_alpha_packets_CE;
-  Count m_alpha_packets_lost;
-  Count m_alpha_packets_sent;
-  // for loss and recovery calculation
-  TimeUs m_loss_ts;
-  CCAlgo m_loss_cca;
-  FracWindowUB m_lost_window;
-  RateBps m_lost_rate;
-  Count m_lost_rtts_to_growth;
-  Count m_loss_packets_lost;
-  Count m_loss_packets_sent;
+  TimeUs last_alpha_update_;
+  Count alpha_packets_received_;
+  Count alpha_packets_marked_;
+  Count alpha_packets_lost_;
+  Count alpha_packets_sent_;
+
+  // For loss and recovery calculation
+  TimeUs last_loss_;
+  CCAlgo cca_before_loss_;
+  FracWindowUB lost_window_;
+  RateBps lost_rate_;
+  Count lost_rtts_to_growth_;
+  Count loss_packets_lost_;
+  Count loss_packets_sent_;
 
   // For congestion experienced and window reduction (cwr) calculation
-  TimeUs m_cwr_ts;
-  Count m_cwr_packets_sent;
+  TimeUs last_cwnd_reduction_;
+  Count cwr_packets_sent_;
 
   // State updated for the actual congestion control variables
-  CCState m_cc_state;
-  CCAlgo m_cca_mode;
-  Count m_rtts_to_growth; // virtual rtts before going into growth mode
-  Probability m_alpha;
-  RateBps m_pacing_rate;
-  FracWindowUB m_fractional_window;
-  Count m_packet_burst;
-  SizeB m_packet_size;
-  Count m_packet_window;
+  CCState state_;
+  CCAlgo mode_;
+  Count rtts_to_growth_; // virtual rtts before going into growth mode
+  Probability alpha_;
+  RateBps pacing_rate_;
+  FracWindowUB fractional_window_;
+  Count packet_burst_;
+  SizeB packet_size_;
+  Count packet_window_;
 };
 
 class PragueCC : private PragueState {
@@ -151,7 +152,7 @@ public:
   bool ACKReceived( // call this when an ACK is received from peer, returns
                     // false if the old ack is ignored
       Count packets_received, // echoed_packet counter
-      Count packets_CE,       // echoed CE counter
+      Count packets_marked,   // echoed CE counter
       Count packets_lost,     // echoed lost counter
       Count packets_sent, // local counter of packets sent up to now, an RTT is
                           // reached if remote ACK packets_received+packets_lost
@@ -186,7 +187,7 @@ public:
 
   void GetACKInfo(             // when the receiving-app needs to send a packet
       Count &packets_received, // packet counter to echo
-      Count &packets_CE,       // CE counter to echo
+      Count &packets_marked,   // CE counter to echo
       Count &packets_lost,     // lost counter to echo (if used)
       bool &error_L4S);        // bleached/error ECN status to echo
 
@@ -206,7 +207,7 @@ public:
 
 private:
   inline void updateAlpha(TimeUs now, Count packets_sent,
-                          Count packets_received, Count packets_CE);
+                          Count packets_received, Count packets_marked);
   inline void reduceOnLoss(TimeUs now, Count packets_sent);
   inline void restoreReduction();
   inline void applyIncrease(TimeUs srtt, Count acks);

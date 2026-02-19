@@ -82,14 +82,13 @@ const Count MIN_FRAME_WIN = 2; // 2 frames
 TimeUs PragueCC::Now() // Returns number of µs since first call
 {
   // Checks if now==0; skip this value used to check uninitialized timepstamp
-  if (m_start_ref == 0) {
-    m_start_ref =
-        TimeUs(std::chrono::duration_cast<std::chrono::microseconds>(
-                   std::chrono::steady_clock::now().time_since_epoch())
-                   .count());
+  if (start_ref_ == 0) {
+    start_ref_ = TimeUs(std::chrono::duration_cast<std::chrono::microseconds>(
+                            std::chrono::steady_clock::now().time_since_epoch())
+                            .count());
 
     // Init m_start_ref with -1 to avoid next now to be less than this value
-    m_start_ref = (m_start_ref != 0) ? m_start_ref : -1;
+    start_ref_ = (start_ref_ != 0) ? start_ref_ : -1;
 
     return 1; // make sure we don't return less than or equal to 0
   }
@@ -97,108 +96,108 @@ TimeUs PragueCC::Now() // Returns number of µs since first call
   TimeUs now = TimeUs(std::chrono::duration_cast<std::chrono::microseconds>(
                           std::chrono::steady_clock::now().time_since_epoch())
                           .count()) -
-               m_start_ref;
+               start_ref_;
 
   return (now != 0) ? now : 1;
 }
 
 TimeUs PragueCC::get_ref_rtt() {
-  return (m_frame_interval != 0) ? m_frame_interval : REF_RTT;
+  return (frame_interval_ != 0) ? frame_interval_ : REF_RTT;
 }
 
 Count PragueCC::get_alpha_shift() {
-  return (m_frame_interval != 0)
-             ? (1 << ALPHA_SHIFT) * (REF_RTT) / (m_frame_interval)
+  return (frame_interval_ != 0)
+             ? (1 << ALPHA_SHIFT) * (REF_RTT) / (frame_interval_)
              : 1 << ALPHA_SHIFT;
 }
 
 PragueCC::PragueCC(SizeB max_packet_size, Fps fps, TimeUs frame_budget,
                    RateBps init_rate, Count init_window, RateBps min_rate,
                    RateBps max_rate) {
-  m_start_ref = 0;
+  start_ref_ = 0;
   TimeUs ts_now = Now();
 
-  m_init_rate = init_rate;
-  m_init_window = FracWindowUB(init_window) * max_packet_size * 1000000;
-  m_min_rate = min_rate;
-  m_max_rate = max_rate;
-  m_max_packet_size = max_packet_size;
-  m_frame_interval = fps ? 1000000 / fps : 0;
-  m_frame_budget = frame_budget;
-  if (m_frame_budget > m_frame_interval)
-    m_frame_budget = m_frame_interval;
+  init_rate_ = init_rate;
+  init_window_ = FracWindowUB(init_window) * max_packet_size * 1000000;
+  min_rate_ = min_rate;
+  max_rate_ = max_rate;
+  max_packet_size_ = max_packet_size;
+  frame_interval_ = fps ? 1000000 / fps : 0;
+  frame_budget_ = frame_budget;
+  if (frame_budget_ > frame_interval_)
+    frame_budget_ = frame_interval_;
 
-  m_ts_remote = 0;
+  ts_remote_ = 0;
 
-  m_rtt = 0;
-  m_srtt = 0;
-  m_vrtt = 0;
+  rtt_ = 0;
+  srtt_ = 0;
+  vrtt_ = 0;
 
-  m_r_prev_ts = 0;
-  m_r_packets_received = 0;
-  m_r_packets_CE = 0;
-  m_r_packets_lost = 0;
-  m_r_error_L4S = false;
+  r_prev_ts_ = 0;
+  r_packets_received_ = 0;
+  r_packets_marked_ = 0;
+  r_packets_lost_ = 0;
+  r_error_L4S_ = false;
 
-  m_cc_ts = ts_now;
-  m_packets_received = 0;
-  m_packets_CE = 0;
-  m_packets_lost = 0;
-  m_packets_sent = 0;
-  m_error_L4S = false;
+  last_cc_update_ = ts_now;
+  packets_received_ = 0;
+  packets_marked_ = 0;
+  packets_lost_ = 0;
+  packets_sent_ = 0;
+  error_L4S_ = false;
 
-  m_alpha_ts = ts_now; // Start recording alpha from now on (every vrtt)
-  m_alpha_packets_received = 0;
-  m_alpha_packets_CE = 0;
-  m_alpha_packets_lost = 0;
-  m_alpha_packets_sent = 0;
+  last_alpha_update_ = ts_now;
+  alpha_packets_received_ = 0;
+  alpha_packets_marked_ = 0;
+  alpha_packets_lost_ = 0;
+  alpha_packets_sent_ = 0;
 
-  m_loss_ts = 0;
-  m_loss_cca = cca_prague_win;
-  m_lost_window = 0;
-  m_lost_rate = 0;
-  m_loss_packets_lost = 0;
-  m_loss_packets_sent = 0;
-  m_lost_rtts_to_growth = 0;
+  last_loss_ = 0;
+  cca_before_loss_ = cca_prague_win;
+  lost_window_ = 0;
+  lost_rate_ = 0;
+  lost_rtts_to_growth_ = 0;
+  loss_packets_lost_ = 0;
+  loss_packets_sent_ = 0;
 
-  m_cwr_ts = 0;
-  m_cwr_packets_sent = 0;
+  last_cwnd_reduction_ = 0;
+  cwr_packets_sent_ = 0;
 
-  m_cc_state = cs_init;
-  m_cca_mode = cca_prague_win;
-  m_rtts_to_growth = init_rate / RATE_STEP + MIN_STEP;
-  m_alpha = 0;
-  m_pacing_rate = init_rate;
-  m_fractional_window = m_init_window;
+  state_ = cs_init;
+  mode_ = cca_prague_win;
+  rtts_to_growth_ = init_rate / RATE_STEP + MIN_STEP;
+  alpha_ = 0;
+  pacing_rate_ = init_rate;
+  fractional_window_ = init_window_;
 
   // B/p = B/s * 25ms/burst / 2p/window
-  m_packet_size = m_pacing_rate * get_ref_rtt() / 1000000 / MIN_PKT_WIN;
-  if (m_packet_size < PRAGUE_MINMTU)
-    m_packet_size = PRAGUE_MINMTU;
-  if (m_packet_size > m_max_packet_size)
-    m_packet_size = m_max_packet_size;
+  packet_size_ = pacing_rate_ * get_ref_rtt() / 1000000 / MIN_PKT_WIN;
+  if (packet_size_ < PRAGUE_MINMTU)
+    packet_size_ = PRAGUE_MINMTU;
+  if (packet_size_ > max_packet_size_)
+    packet_size_ = max_packet_size_;
 
   // p = B/s * 250µs / B/p
-  m_packet_burst = Count(m_pacing_rate * BURST_TIME / 1000000 / m_packet_size);
-  if (m_packet_burst < MIN_PKT_BURST)
-    m_packet_burst = MIN_PKT_BURST;
+  packet_burst_ = Count(pacing_rate_ * BURST_TIME / 1000000 / packet_size_);
+  if (packet_burst_ < MIN_PKT_BURST)
+    packet_burst_ = MIN_PKT_BURST;
 
-  m_packet_window = Count((m_fractional_window / 1000000 + m_packet_size - 1) /
-                          m_packet_size);
-  if (m_packet_window < MIN_PKT_WIN)
-    m_packet_window = MIN_PKT_WIN;
+  packet_window_ =
+      Count((fractional_window_ / 1000000 + packet_size_ - 1) / packet_size_);
+  if (packet_window_ < MIN_PKT_WIN)
+    packet_window_ = MIN_PKT_WIN;
 }
 
 PragueCC::~PragueCC() {}
 
 bool PragueCC::RFC8888Received(size_t num_rtt, TimeUs *pkts_rtt) {
   for (size_t i = 0; i < num_rtt; i++) {
-    m_rtt = pkts_rtt[i];
-    if (m_cc_state != cs_init)
-      m_srtt += (m_rtt - m_srtt) >> 3;
+    rtt_ = pkts_rtt[i];
+    if (state_ != cs_init)
+      srtt_ += (rtt_ - srtt_) >> 3;
     else
-      m_srtt = m_rtt;
-    m_vrtt = (m_srtt > get_ref_rtt()) ? m_srtt : get_ref_rtt();
+      srtt_ = rtt_;
+    vrtt_ = (srtt_ > get_ref_rtt()) ? srtt_ : get_ref_rtt();
   }
   return true;
 }
@@ -206,43 +205,43 @@ bool PragueCC::RFC8888Received(size_t num_rtt, TimeUs *pkts_rtt) {
 bool PragueCC::PacketReceived(const TimeUs timestamp,
                               const TimeUs echoed_timestamp) {
   // Ignore older or invalid ACKs (these counters can't go down in new ACKs)
-  if ((m_cc_state != cs_init) && (m_r_prev_ts - timestamp > 0))
+  if ((state_ != cs_init) && (r_prev_ts_ - timestamp > 0))
     return false;
 
   TimeUs ts = Now();
-  m_ts_remote = ts - timestamp;  // freeze the remote timestamp
-  m_rtt = ts - echoed_timestamp; // calculate the new rtt sample
+  ts_remote_ = ts - timestamp;  // freeze the remote timestamp
+  rtt_ = ts - echoed_timestamp; // calculate the new rtt sample
 
-  if (m_cc_state != cs_init)
-    m_srtt += (m_rtt - m_srtt) >> 3; // smooth with EWMA of 1/8th
+  if (state_ != cs_init)
+    srtt_ += (rtt_ - srtt_) >> 3; // smooth with EWMA of 1/8th
   else
-    m_srtt = m_rtt;
+    srtt_ = rtt_;
 
   // Calculate the virtual RTT (if srtt < 25ms reference RTT)
-  m_vrtt = (m_srtt > get_ref_rtt()) ? m_srtt : get_ref_rtt();
+  vrtt_ = (srtt_ > get_ref_rtt()) ? srtt_ : get_ref_rtt();
 
-  m_r_prev_ts = timestamp;
+  r_prev_ts_ = timestamp;
 
   return true;
 }
 
-bool PragueCC::ACKReceived(Count packets_received, Count packets_CE,
+bool PragueCC::ACKReceived(Count packets_received, Count packets_marked,
                            Count packets_lost, Count packets_sent,
                            bool error_L4S, Count &inflight) {
   // Ignore older or invalid ACKs (these counters can't go down in new ACKs)
-  if ((m_packets_received - packets_received > 0) ||
-      (m_packets_CE - packets_CE > 0))
+  if ((packets_received_ - packets_received > 0) ||
+      (packets_marked_ - packets_marked > 0))
     return false;
 
   // Calculate the max expected rtt from pacing
-  TimeUs pacing_interval = m_packet_size * 1000000 / m_pacing_rate;
+  TimeUs pacing_interval = packet_size_ * 1000000 / pacing_rate_;
 
-  TimeUs srtt = (m_srtt);
+  TimeUs srtt = (srtt_);
 
   // Initialize the window with the initial pacing rate
-  if (m_cc_state == cs_init) {
-    m_fractional_window = srtt * m_pacing_rate;
-    m_cc_state = cs_cong_avoid;
+  if (state_ == cs_init) {
+    fractional_window_ = srtt * pacing_rate_;
+    state_ = cs_cong_avoid;
   }
 
   // Select the rate- or window-based update, but keep the rate stable on
@@ -250,299 +249,299 @@ bool PragueCC::ACKReceived(Count packets_received, Count packets_CE,
   // calculate a rate. Also no queue can be identified reliably.
   if ((srtt <= 2000) || (srtt <= pacing_interval)) {
     // Keep rate stable when large dip in srtt
-    m_cca_mode = cca_prague_rate;
+    mode_ = cca_prague_rate;
   } else {
     // Keep rate stable when large jump in srtt
-    if (m_cca_mode == cca_prague_rate)
-      m_fractional_window = srtt * m_pacing_rate;
-    m_cca_mode = cca_prague_win;
+    if (mode_ == cca_prague_rate)
+      fractional_window_ = srtt * pacing_rate_;
+    mode_ = cca_prague_win;
   }
 
   TimeUs ts = Now();
 
   // Update alpha if both a window and a virtual rtt are passed
-  if ((packets_received + packets_lost - m_alpha_packets_sent > 0) &&
-      (ts - m_alpha_ts - m_vrtt >= 0)) {
-    updateAlpha(ts, packets_sent, packets_received, packets_CE);
+  if ((packets_received + packets_lost - alpha_packets_sent_ > 0) &&
+      (ts - last_alpha_update_ - vrtt_ >= 0)) {
+    updateAlpha(ts, packets_sent, packets_received, packets_marked);
   }
 
   // Undo the window reduction if the lost count is again down to the one that
   // caused a reduction (reordered iso loss)
-  if ((m_lost_window > 0 || m_lost_rate > 0) &&
-      (m_loss_packets_lost - packets_lost >= 0))
+  if ((lost_window_ > 0 || lost_rate_ > 0) &&
+      (loss_packets_lost_ - packets_lost >= 0))
     restoreReduction();
 
   // Clear the in_loss state if in_loss and a real and virtual rtt are passed
-  if ((m_cc_state == cs_in_loss) &&
-      (packets_received + packets_lost - m_loss_packets_sent > 0) &&
-      (ts - m_loss_ts - m_vrtt >= 0))
-    m_cc_state = cs_cong_avoid;
+  if ((state_ == cs_in_loss) &&
+      (packets_received + packets_lost - loss_packets_sent_ > 0) &&
+      (ts - last_loss_ - vrtt_ >= 0))
+    state_ = cs_cong_avoid;
 
   // Reduce the window if the loss count is increased
-  if ((m_cc_state != cs_in_loss) && (m_packets_lost - packets_lost < 0))
+  if ((state_ != cs_in_loss) && (packets_lost_ - packets_lost < 0))
     reduceOnLoss(ts, packets_sent);
 
   // Increase the window if not in-loss for all the non-CE ACKs
-  Count acks =
-      (packets_received - m_packets_received) - (packets_CE - m_packets_CE);
+  Count acks = (packets_received - packets_received_) -
+               (packets_marked - packets_marked_);
 
-  if ((m_cc_state != cs_in_loss) && (acks > 0))
+  if ((state_ != cs_in_loss) && (acks > 0))
     applyIncrease(srtt, acks);
 
   // Clear the in_cwr state if in_cwr and a real and virtual rtt are passed
-  if ((m_cc_state == cs_in_cwr) &&
-      (packets_received + packets_lost - m_cwr_packets_sent > 0) &&
-      (ts - m_cwr_ts - m_vrtt >= 0)) {
+  if ((state_ == cs_in_cwr) &&
+      (packets_received + packets_lost - cwr_packets_sent_ > 0) &&
+      (ts - last_cwnd_reduction_ - vrtt_ >= 0)) {
     // Set the loss state to avoid multiple reductions per RTT
-    m_cc_state = cs_cong_avoid;
+    state_ = cs_cong_avoid;
   }
 
   // Reduce the window if the CE count is increased, and if not in-loss and not
   // in-cwr
-  if ((m_cc_state == cs_cong_avoid) && (m_packets_CE - packets_CE < 0)) {
+  if ((state_ == cs_cong_avoid) && (packets_marked_ - packets_marked < 0)) {
     // First reset the growth waiting time
-    m_rtts_to_growth = m_pacing_rate / RATE_STEP + MIN_STEP;
+    rtts_to_growth_ = pacing_rate_ / RATE_STEP + MIN_STEP;
 
-    if (m_cca_mode == cca_prague_win) // Reduce the window by a factor alpha/2
-      m_fractional_window -= m_fractional_window * m_alpha >> (PROB_SHIFT + 1);
+    if (mode_ == cca_prague_win) // Reduce the window by a factor alpha/2
+      fractional_window_ -= fractional_window_ * alpha_ >> (PROB_SHIFT + 1);
     else // Reduce the rate by a factor alpha/2
-      m_pacing_rate -= m_pacing_rate * m_alpha >> (PROB_SHIFT + 1);
+      pacing_rate_ -= pacing_rate_ * alpha_ >> (PROB_SHIFT + 1);
 
     // Set the loss state to avoid multiple reductions per RTT
-    m_cc_state = cs_in_cwr;
-    m_cwr_packets_sent = packets_sent; // set when to end in_loss state
-    m_cwr_ts = ts; // Set the cwr timestampt to check if a virtRtt is passed
+    state_ = cs_in_cwr;
+    cwr_packets_sent_ = packets_sent; // set when to end in_loss state
+    last_cwnd_reduction_ =
+        ts; // Set the cwr timestampt to check if a virtRtt is passed
   }
 
   // Updating dependant parameters
   // align and limit pacing rate and fractional window
-  if (m_cca_mode != cca_prague_rate)
-    m_pacing_rate = m_fractional_window / srtt; // in B/s
-  if (m_pacing_rate < m_min_rate)
-    m_pacing_rate = m_min_rate;
-  if (m_pacing_rate > m_max_rate)
-    m_pacing_rate = m_max_rate;
-  m_fractional_window = m_pacing_rate * srtt; // in uB
-  if (m_fractional_window == 0)
-    m_fractional_window = 1;
+  if (mode_ != cca_prague_rate)
+    pacing_rate_ = fractional_window_ / srtt; // in B/s
+  if (pacing_rate_ < min_rate_)
+    pacing_rate_ = min_rate_;
+  if (pacing_rate_ > max_rate_)
+    pacing_rate_ = max_rate_;
+  fractional_window_ = pacing_rate_ * srtt; // in uB
+  if (fractional_window_ == 0)
+    fractional_window_ = 1;
 
   // Determine packet size
-  m_packet_size = m_pacing_rate * m_vrtt / 1000000 /
-                  MIN_PKT_WIN; // B/p = B/s * 25ms/burst / 2p/burst
-  if (m_packet_size < PRAGUE_MINMTU)
-    m_packet_size = PRAGUE_MINMTU;
-  if (m_packet_size > m_max_packet_size)
-    m_packet_size = m_max_packet_size;
+  packet_size_ = pacing_rate_ * vrtt_ / 1000000 /
+                 MIN_PKT_WIN; // B/p = B/s * 25ms/burst / 2p/burst
+  if (packet_size_ < PRAGUE_MINMTU)
+    packet_size_ = PRAGUE_MINMTU;
+  if (packet_size_ > max_packet_size_)
+    packet_size_ = max_packet_size_;
 
   // Packet burst
-  m_packet_burst = Count(m_pacing_rate * BURST_TIME / 1000000 /
-                         m_packet_size); // p = B/s * 250µs / B/p
-  if (m_packet_burst < MIN_PKT_BURST) {
-    m_packet_burst = MIN_PKT_BURST;
+  packet_burst_ = Count(pacing_rate_ * BURST_TIME / 1000000 /
+                        packet_size_); // p = B/s * 250µs / B/p
+  if (packet_burst_ < MIN_PKT_BURST) {
+    packet_burst_ = MIN_PKT_BURST;
   }
 
   // packet window: allow 3% higher pacing rate and round up (add one). Window
   // should not block pacing; block only when the network has a freeze or
   // hiccup.
-  m_packet_window = Count(
-      (m_fractional_window * (100 + RATE_OFFSET) / 100000000) / m_packet_size +
+  packet_window_ = Count(
+      (fractional_window_ * (100 + RATE_OFFSET) / 100000000) / packet_size_ +
       1);
-  if (m_packet_window < MIN_PKT_WIN) {
-    m_packet_window = MIN_PKT_WIN;
+  if (packet_window_ < MIN_PKT_WIN) {
+    packet_window_ = MIN_PKT_WIN;
   }
 
   // remember this previous ACK for the next ACK
-  m_cc_ts = ts;
-  m_packets_received = packets_received; // can NOT go down
-  m_packets_CE = packets_CE;             // can NOT go down
-  m_packets_lost = packets_lost;         // CAN go down
-  m_packets_sent = packets_sent;         // can NOT go down
-  m_error_L4S |= error_L4S;              // can NOT reset
-  inflight = packets_sent - m_packets_received - m_packets_lost;
+  last_cc_update_ = ts;
+  packets_received_ = packets_received; // can NOT go down
+  packets_marked_ = packets_marked;     // can NOT go down
+  packets_lost_ = packets_lost;         // CAN go down
+  packets_sent_ = packets_sent;         // can NOT go down
+  error_L4S_ |= error_L4S;              // can NOT reset
+  inflight = packets_sent - packets_received_ - packets_lost_;
   return true;
 }
 
 void PragueCC::DataReceivedSequence(Ecn ip_ecn, Count packet_seq_nr) {
   ip_ecn = Ecn(ip_ecn & ecn_ce);
-  m_r_packets_received++; // Assuming no duplicates (by for instance the NW)
-  Count skipped = packet_seq_nr - m_r_packets_received - m_r_packets_lost;
+  r_packets_received_++; // Assuming no duplicates (by for instance the NW)
+  Count skipped = packet_seq_nr - r_packets_received_ - r_packets_lost_;
 
   if (skipped >= 0)
-    m_r_packets_lost += skipped; // 0 or more lost
-  else if (m_r_packets_lost > 0)
-    m_r_packets_lost--; // reordered packet
+    r_packets_lost_ += skipped; // 0 or more lost
+  else if (r_packets_lost_ > 0)
+    r_packets_lost_--; // reordered packet
 
   if (ip_ecn == ecn_ce)
-    m_r_packets_CE++;
+    r_packets_marked_++;
   else if (ip_ecn != ecn_l4s_id)
-    m_r_error_L4S = true;
+    r_error_L4S_ = true;
 }
 
 void PragueCC::DataReceived(Ecn ip_ecn, Count packets_lost) {
   ip_ecn = Ecn(ip_ecn & ecn_ce);
-  m_r_packets_received++;
-  m_r_packets_lost += packets_lost;
+  r_packets_received_++;
+  r_packets_lost_ += packets_lost;
   if (ip_ecn == ecn_ce)
-    m_r_packets_CE++;
+    r_packets_marked_++;
   else if (ip_ecn != ecn_l4s_id)
-    m_r_error_L4S = true;
+    r_error_L4S_ = true;
 }
 
 void PragueCC::ResetCCInfo() {
-  m_cc_ts = Now();
-  m_cc_state = cs_init;
-  m_cca_mode = cca_prague_win;
-  m_alpha_ts = m_cc_ts;
-  m_alpha = 0;
-  m_pacing_rate = m_init_rate;
-  m_fractional_window = m_max_packet_size * 1000000; // Reset to 1 packet
-  m_packet_burst = MIN_PKT_BURST;
-  m_packet_size = m_max_packet_size;
-  m_packet_window = MIN_PKT_WIN;
-  m_rtts_to_growth = m_pacing_rate / RATE_STEP + MIN_STEP;
-  m_lost_rtts_to_growth = 0;
+  last_cc_update_ = Now();
+  state_ = cs_init;
+  mode_ = cca_prague_win;
+  last_alpha_update_ = last_cc_update_;
+  alpha_ = 0;
+  pacing_rate_ = init_rate_;
+  fractional_window_ = max_packet_size_ * 1000000; // Reset to 1 packet
+  packet_burst_ = MIN_PKT_BURST;
+  packet_size_ = max_packet_size_;
+  packet_window_ = MIN_PKT_WIN;
+  rtts_to_growth_ = pacing_rate_ / RATE_STEP + MIN_STEP;
+  lost_rtts_to_growth_ = 0;
 }
 
 void PragueCC::GetTimeInfo(TimeUs &timestamp, TimeUs &echoed_timestamp,
                            Ecn &ip_ecn) {
   timestamp = Now();
-
-  echoed_timestamp = (m_ts_remote != 0) ? timestamp - m_ts_remote : 0;
-  ip_ecn = (m_error_L4S) ? ecn_not_ect : ecn_l4s_id;
+  echoed_timestamp = (ts_remote_ != 0) ? timestamp - ts_remote_ : 0;
+  ip_ecn = (error_L4S_) ? ecn_not_ect : ecn_l4s_id;
 }
 
 void PragueCC::GetCCInfo(RateBps &pacing_rate, Count &packet_window,
                          Count &packet_burst, SizeB &packet_size) {
-  if (Now() - m_alpha_ts - (m_vrtt >> 1) >= 0)
-    pacing_rate = m_pacing_rate * 100 / (100 + RATE_OFFSET);
+  if (Now() - last_alpha_update_ - (vrtt_ >> 1) >= 0)
+    pacing_rate = pacing_rate_ * 100 / (100 + RATE_OFFSET);
   else
-    pacing_rate = m_pacing_rate * (100 + RATE_OFFSET) / 100;
+    pacing_rate = pacing_rate_ * (100 + RATE_OFFSET) / 100;
 
-  packet_window = m_packet_window;
-  packet_burst = m_packet_burst;
-  packet_size = m_packet_size;
+  packet_window = packet_window_;
+  packet_burst = packet_burst_;
+  packet_size = packet_size_;
 }
 
 void PragueCC::GetCCInfoVideo(RateBps &pacing_rate, SizeB &frame_size,
                               Count &frame_window, Count &packet_burst,
                               SizeB &packet_size) {
-  pacing_rate = m_pacing_rate;
-  packet_burst = m_packet_burst;
-  packet_size = m_packet_size;
-  frame_size = (m_packet_size > m_pacing_rate * m_frame_budget / 1000000)
-                   ? (m_packet_size)
-                   : (m_pacing_rate * m_frame_budget / 1000000);
-  frame_window = m_packet_window * m_packet_size / frame_size;
+  pacing_rate = pacing_rate_;
+  packet_burst = packet_burst_;
+  packet_size = packet_size_;
+  frame_size = (packet_size_ > pacing_rate_ * frame_budget_ / 1000000)
+                   ? (packet_size_)
+                   : (pacing_rate_ * frame_budget_ / 1000000);
+  frame_window = packet_window_ * packet_size_ / frame_size;
   if (frame_window < MIN_FRAME_WIN)
     frame_window = MIN_FRAME_WIN;
 }
 
-void PragueCC::GetACKInfo(Count &packets_received, Count &packets_CE,
+void PragueCC::GetACKInfo(Count &packets_received, Count &packets_marked,
                           Count &packets_lost, bool &error_L4S) {
-  packets_received = m_r_packets_received;
-  packets_CE = m_r_packets_CE;
-  packets_lost = m_r_packets_lost;
-  error_L4S = m_r_error_L4S;
+  packets_received = r_packets_received_;
+  packets_marked = r_packets_marked_;
+  packets_lost = r_packets_lost_;
+  error_L4S = r_error_L4S_;
 }
 
 void PragueCC::reduceOnLoss(TimeUs now, Count packets_sent) {
   // vRTTs needed to get to the time where a REF_RTT flow would hit the same
   // bottleneck again. after that do 1ms growth
-  Count rtts_to_growth = m_pacing_rate / 2 / m_max_packet_size * REF_RTT /
-                         m_vrtt * REF_RTT / 1000000; // rescale twice
+  Count rtts_to_growth = pacing_rate_ / 2 / max_packet_size_ * REF_RTT / vrtt_ *
+                         REF_RTT / 1000000; // rescale twice
   // First reset the growth waiting time, but prepare to undo
-  m_lost_rtts_to_growth +=
-      rtts_to_growth - m_rtts_to_growth; // accumulate over different
-                                         // reordering rtts if applicable
+  lost_rtts_to_growth_ +=
+      rtts_to_growth - rtts_to_growth_; // accumulate over different
+                                        // reordering rtts if applicable
 
   // No need to undo more than what will be used next
-  if (m_lost_rtts_to_growth > rtts_to_growth)
-    m_lost_rtts_to_growth = rtts_to_growth;
+  if (lost_rtts_to_growth_ > rtts_to_growth)
+    lost_rtts_to_growth_ = rtts_to_growth;
 
-  // also equivalent to m_rtts_to_growth += m_lost_rtts_to_growth; so can be
+  // also equivalent to rtts_to_growth_ += m_lost_rtts_to_growth; so can be
   // undone with -=
-  m_rtts_to_growth = rtts_to_growth;
+  rtts_to_growth_ = rtts_to_growth;
 
-  if (m_cca_mode == cca_prague_win) {
-    m_lost_window = m_fractional_window / 2; // remember the reduction
-    m_fractional_window -= m_lost_window;    // reduce the window
-  } else {                                   // (m_cca_mode == cca_prague_rate)
-    m_lost_rate = m_pacing_rate / 2;         // remember the reduction
-    m_pacing_rate -= m_lost_rate;            // reduce the rate
+  if (mode_ == cca_prague_win) {
+    lost_window_ = fractional_window_ / 2; // remember the reduction
+    fractional_window_ -= lost_window_;    // reduce the window
+  } else {                                 // (mode_ == cca_prague_rate)
+    lost_rate_ = pacing_rate_ / 2;         // remember the reduction
+    pacing_rate_ -= lost_rate_;            // reduce the rate
   }
 
   // set the loss state to avoid multiple reductions per RTT
-  m_cc_state = cs_in_loss;
-  m_loss_cca = m_cca_mode;
-  m_loss_packets_sent = packets_sent; // Set when to end in_loss state
-  m_loss_ts = now; // Set the loss timestampt to check if a virtRtt is passed
+  state_ = cs_in_loss;
+  cca_before_loss_ = mode_;
+  loss_packets_sent_ = packets_sent; // Set when to end in_loss state
+  last_loss_ = now; // Set the loss timestamp to check if a virtRtt is passed
 
   // Remember the previous packets_lost for the undo if needed
-  m_loss_packets_lost = m_packets_lost;
+  loss_packets_lost_ = packets_lost_;
 }
 
 void PragueCC::restoreReduction() {
-  m_cca_mode = m_loss_cca; // Restore the cca mode before recovery
-  if (m_cca_mode == cca_prague_rate) {
-    m_pacing_rate += m_lost_rate; // Add the reduction to the rate again
-    m_lost_rate = 0;              // Can be done only once
+  mode_ = cca_before_loss_; // Restore the cca mode before recovery
+  if (mode_ == cca_prague_rate) {
+    pacing_rate_ += lost_rate_; // Add the reduction to the rate again
+    lost_rate_ = 0;             // Can be done only once
   } else {
     // Add the reduction to the window again
-    m_fractional_window += m_lost_window;
-    m_lost_window = 0; // Can be done only once
+    fractional_window_ += lost_window_;
+    lost_window_ = 0; // Can be done only once
   }
 
-  m_rtts_to_growth -= m_lost_rtts_to_growth; // Restore the rtts to growth
-  if (m_rtts_to_growth < 0)
-    m_rtts_to_growth = 0;
-  m_lost_rtts_to_growth = 0;  // Clear all lost growth rtts
-  m_cc_state = cs_cong_avoid; // Restore the loss statea
+  rtts_to_growth_ -= lost_rtts_to_growth_; // Restore the rtts to growth
+  if (rtts_to_growth_ < 0)
+    rtts_to_growth_ = 0;
+  lost_rtts_to_growth_ = 0; // Clear all lost growth rtts
+  state_ = cs_cong_avoid;   // Restore the loss statea
 }
 
 void PragueCC::updateAlpha(TimeUs now, Count packets_sent,
-                           Count packets_received, Count packets_CE) {
+                           Count packets_received, Count packets_marked) {
   Probability prob =
-      (Probability(packets_CE - m_alpha_packets_CE) << PROB_SHIFT) /
-      (packets_received - m_alpha_packets_received);
-  m_alpha += ((prob - m_alpha) / get_alpha_shift());
-  m_alpha = (m_alpha > MAX_PROB) ? MAX_PROB : m_alpha;
-  m_alpha_packets_sent = packets_sent;
-  m_alpha_packets_CE = packets_CE;
-  m_alpha_packets_received = packets_received;
-  m_alpha_ts = now;
+      (Probability(packets_marked - alpha_packets_marked_) << PROB_SHIFT) /
+      (packets_received - alpha_packets_received_);
+  alpha_ += ((prob - alpha_) / get_alpha_shift());
+  alpha_ = (alpha_ > MAX_PROB) ? MAX_PROB : alpha_;
+  alpha_packets_sent_ = packets_sent;
+  alpha_packets_marked_ = packets_marked;
+  alpha_packets_received_ = packets_received;
+  last_alpha_update_ = now;
 
   // Also reduce the rtts to growth if not already 0
-  if (m_rtts_to_growth > 0)
-    m_rtts_to_growth--;
+  if (rtts_to_growth_ > 0)
+    rtts_to_growth_--;
 }
 
 void PragueCC::applyIncrease(TimeUs srtt, Count acks) {
   // incr = B/s * 1ms
-  SizeB increment = mul_64_64_shift(m_pacing_rate, QUEUE_GROWTH) / 1000000;
+  SizeB increment = mul_64_64_shift(pacing_rate_, QUEUE_GROWTH) / 1000000;
 
   // increment with 1ms queue delay if no more rtts to wait for growth and if
   // > than 1 max packet
-  if ((increment < m_max_packet_size) || m_rtts_to_growth)
-    increment = m_max_packet_size;
+  if ((increment < max_packet_size_) || rtts_to_growth_)
+    increment = max_packet_size_;
 
   // W[p] = W + acks / W * (srrt/vrtt)², but in the right order to not lose
   // precision W[µB] = W + acks * mtu² * 1000000² / W * (srrt/vrtt)² correct
   // order to prevent loss of precision
-  if (m_cca_mode == cca_prague_win) {
+  if (mode_ == cca_prague_win) {
     // Use mul_64_64 to implicitely convert to uint64_t
-    uint64_t divisor = mul_64_64_shift(m_vrtt, m_vrtt);
+    uint64_t divisor = mul_64_64_shift(vrtt_, vrtt_);
     uint64_t scaler = div_64_64_round((uint64_t)srtt * 1000000 * srtt, divisor);
-    uint64_t increase = div_64_64_round(acks * m_packet_size * scaler * 1000000,
-                                        m_fractional_window);
+    uint64_t increase = div_64_64_round(acks * packet_size_ * scaler * 1000000,
+                                        fractional_window_);
     uint64_t scaled_increase = mul_64_64_shift(increase, increment);
-    m_fractional_window += scaled_increase;
+    fractional_window_ += scaled_increase;
   } else {
-    uint64_t divisor = mul_64_64_shift(m_packet_size, 1000000);
+    uint64_t divisor = mul_64_64_shift(packet_size_, 1000000);
     uint64_t invscaler =
-        div_64_64_round(mul_64_64_shift(m_pacing_rate, m_vrtt), divisor);
+        div_64_64_round(mul_64_64_shift(pacing_rate_, vrtt_), divisor);
     uint64_t increase = div_64_64_round(
-        mul_64_64_shift((uint64_t)acks * increment, 1000000), m_vrtt);
+        mul_64_64_shift((uint64_t)acks * increment, 1000000), vrtt_);
     uint64_t scaled_increase = div_64_64_round(increase, invscaler);
-    m_pacing_rate += scaled_increase;
+    pacing_rate_ += scaled_increase;
   }
 }
