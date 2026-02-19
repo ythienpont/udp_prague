@@ -4,208 +4,211 @@
 #include <cstddef>
 #include <stdint.h>
 
-typedef uint64_t size_tp;   // size in Bytes
-typedef uint64_t window_tp; // fractional window size in µBytes (to match time
-                            // in µs, for easy Bytes/second rate calculations)
-typedef uint64_t rate_tp;   // rate in Bytes/second
-typedef int32_t
-    time_tp; // timestamp or interval in microseconds, timestamps have a fixed
-             // but no meaningful reference, so use only for intervals beteen 2
-             // timestamps signed because it can wrap around, and we need to
-             // compare both ways (< 0 and > 0)
-typedef int32_t count_tp; // count in packets (or frames), signed because it can
-                          // wrap around, and we need to compare both ways
-enum ecn_tp : uint8_t {
+typedef uint64_t SizeB; // size in Bytes
+
+// fractional window size in µBytes (to match time in µs, for easy Bytes/second
+// rate calculations)
+typedef uint64_t FracWindowUB;
+
+typedef uint64_t RateBps; // rate in Bytes/second
+
+// Timestamp or interval in microseconds, timestamps have a fixed
+// but no meaningful reference, so use only for intervals beteen 2
+// timestamps signed because it can wrap around, and we need to
+// compare both ways (< 0 and > 0)
+typedef int32_t TimeUs;
+
+// Count in packets (or frames), signed because it can
+// wrap around, and we need to compare both ways
+typedef int32_t Count;
+
+// 2 bits in the IP header, only values 0-3 are valid, and 1 (0b01) and 3 (0b11)
+// are L4S valid
+enum Ecn : uint8_t {
   ecn_not_ect = 0,
   ecn_l4s_id = 1,
   ecn_ect0 = 2,
   ecn_ce = 3
 };
-// 2 bits in the IP header, only values 0-3 are valid, and 1 (0b01) and 3 (0b11)
-// are L4S valid
-typedef uint8_t fps_tp; // frames per second: any value from 1 till 255 can be
-                        // used, 0 must be used for bulk
-typedef int64_t prob_tp;
-enum cs_tp { cs_init, cs_cong_avoid, cs_in_loss, cs_in_cwr };
-enum cca_tp { cca_prague_win, cca_prague_rate }; // which CC algorithm is active
 
-static const count_tp PRAGUE_INITWIN = 10;  // Prague initial window size
-static const size_tp PRAGUE_MINMTU = 150;   // Prague minmum MTU size
-static const size_tp PRAGUE_INITMTU = 1400; // Prague initial MTU size
-static const rate_tp PRAGUE_INITRATE =
-    12500; // Prague initial rate 12500 Byte/s (equiv. 100kbps)
-static const rate_tp PRAGUE_MINRATE =
-    12500; // Prague minimum rate 12500 Byte/s (equiv. 100kbps)
-static const rate_tp PRAGUE_MAXRATE =
-    12500000000; // Prague maximum rate 12500000000 Byte/s (equiv. 100Gbps)
+// Frames per second: any value from 1 to 255 can be used, 0 for bulk
+typedef uint8_t Fps;
+typedef int64_t Probability;
+
+enum CCState { cs_init, cs_cong_avoid, cs_in_loss, cs_in_cwr };
+enum CCAlgo { cca_prague_win, cca_prague_rate };
+
+static const Count PRAGUE_INITWIN = 10;   // Prague initial window size
+static const SizeB PRAGUE_MINMTU = 150;   // Prague minmum MTU size
+static const SizeB PRAGUE_INITMTU = 1400; // Prague initial MTU size
+// Prague initial rate 12500 Byte/s (equiv. 100kbps)
+static const RateBps PRAGUE_INITRATE = 12500;
+// Prague minimum rate 12500 Byte/s (equiv. 100kbps)
+static const RateBps PRAGUE_MINRATE = 12500;
+// Prague maximum rate 12500000000 Byte/s (equiv. 100Gbps)
+static const RateBps PRAGUE_MAXRATE = 12500000000;
 
 struct PragueState {
-  time_tp m_start_ref; // used to have a start time of 0
-                       // parameters
-  rate_tp m_init_rate;
-  window_tp m_init_window;
-  rate_tp m_min_rate;
-  rate_tp m_max_rate;
-  size_tp m_max_packet_size;
-  time_tp m_frame_interval;
-  time_tp m_frame_budget;
-  // both-end variables
-  time_tp m_ts_remote; // to keep the frozen timestamp from the peer, and echo
-                       // it back defrosted
-  time_tp m_rtt;       // last reported rtt (only for stats)
-  time_tp m_srtt; // our own measured and smoothed RTT (smoothing factor = 1/8)
-  time_tp m_vrtt; // our own virtual RTT = max(srtt, 25ms)
-                  // receiver-end variables (to be echoed to sender)
-  time_tp
-      m_r_prev_ts; // used to see if an ack isn't older than the previous ack
-  count_tp m_r_packets_received; // as a receiver, keep counters to echo back
-  count_tp m_r_packets_CE;
-  count_tp m_r_packets_lost;
+  // Parameters
+
+  // Used to have a start time of 0
+  TimeUs m_start_ref;
+
+  RateBps m_init_rate;
+  FracWindowUB m_init_window;
+  RateBps m_min_rate;
+  RateBps m_max_rate;
+  SizeB m_max_packet_size;
+  TimeUs m_frame_interval;
+  TimeUs m_frame_budget;
+
+  // Both-end variables
+  TimeUs m_ts_remote; // to keep the frozen timestamp from the peer, and echo
+                      // it back defrosted
+  TimeUs m_rtt;       // last reported rtt (only for stats)
+  TimeUs m_srtt; // our own measured and smoothed RTT (smoothing factor = 1/8)
+  TimeUs m_vrtt; // our own virtual RTT = max(srtt, 25ms)
+
+  // Receiver-end variables (to be echoed to sender)
+  TimeUs m_r_prev_ts; // used to see if an ack isn't older than the previous ack
+  Count m_r_packets_received; // as a receiver, keep counters to echo back
+  Count m_r_packets_CE;
+  Count m_r_packets_lost;
   bool m_r_error_L4S; // as a receiver, check L4S-ECN validity to echo back an
                       // error
                       // sender-end variables
-  time_tp m_cc_ts;
-  count_tp m_packets_received; // latest known receiver end counters
-  count_tp m_packets_CE;
-  count_tp m_packets_lost;
-  count_tp m_packets_sent;
+  TimeUs m_cc_ts;
+  Count m_packets_received; // latest known receiver end counters
+  Count m_packets_CE;
+  Count m_packets_lost;
+  Count m_packets_sent;
   bool m_error_L4S; // latest known receiver-end error state
-  // for alpha calculation, keep the previous alpha variables' state
-  time_tp m_alpha_ts;
-  count_tp m_alpha_packets_received;
-  count_tp m_alpha_packets_CE;
-  count_tp m_alpha_packets_lost;
-  count_tp m_alpha_packets_sent;
+
+  // For alpha calculation, keep the previous alpha variables' state
+  TimeUs m_alpha_ts;
+  Count m_alpha_packets_received;
+  Count m_alpha_packets_CE;
+  Count m_alpha_packets_lost;
+  Count m_alpha_packets_sent;
   // for loss and recovery calculation
-  time_tp m_loss_ts;
-  cca_tp m_loss_cca;
-  window_tp m_lost_window;
-  rate_tp m_lost_rate;
-  count_tp m_lost_rtts_to_growth;
-  count_tp m_loss_packets_lost;
-  count_tp m_loss_packets_sent;
-  // for congestion experienced and window reduction (cwr) calculation
-  time_tp m_cwr_ts;
-  count_tp m_cwr_packets_sent;
-  // state updated for the actual congestion control variables
-  cs_tp m_cc_state;
-  cca_tp m_cca_mode;
-  count_tp m_rtts_to_growth; // virtual rtts before going into growth mode
-  prob_tp m_alpha;
-  rate_tp m_pacing_rate;
-  window_tp m_fractional_window;
-  count_tp m_packet_burst;
-  size_tp m_packet_size;
-  count_tp m_packet_window;
+  TimeUs m_loss_ts;
+  CCAlgo m_loss_cca;
+  FracWindowUB m_lost_window;
+  RateBps m_lost_rate;
+  Count m_lost_rtts_to_growth;
+  Count m_loss_packets_lost;
+  Count m_loss_packets_sent;
+
+  // For congestion experienced and window reduction (cwr) calculation
+  TimeUs m_cwr_ts;
+  Count m_cwr_packets_sent;
+
+  // State updated for the actual congestion control variables
+  CCState m_cc_state;
+  CCAlgo m_cca_mode;
+  Count m_rtts_to_growth; // virtual rtts before going into growth mode
+  Probability m_alpha;
+  RateBps m_pacing_rate;
+  FracWindowUB m_fractional_window;
+  Count m_packet_burst;
+  SizeB m_packet_size;
+  Count m_packet_window;
 };
 
 class PragueCC : private PragueState {
 public:
   PragueCC(
-      size_tp max_packet_size =
+      SizeB max_packet_size =
           PRAGUE_INITMTU, // use MTU detection, or a low enough value. Can be
                           // updated on the fly (todo)
-      fps_tp fps = 0, // only used for video; frames per second, 0 must be used
-                      // for bulk transfer
-      time_tp frame_budget = 0, // only used for video; over what time [µs] you
-                                // want to pace the frame (max 1000000/fps [µs])
-      rate_tp init_rate = PRAGUE_INITRATE,
-      count_tp init_window = PRAGUE_INITWIN, rate_tp min_rate = PRAGUE_MINRATE,
-      rate_tp max_rate = PRAGUE_MAXRATE);
+      Fps fps = 0, // only used for video; frames per second, 0 must be used
+                   // for bulk transfer
+      TimeUs frame_budget = 0, // only used for video; over what time [µs] you
+                               // want to pace the frame (max 1000000/fps [µs])
+      RateBps init_rate = PRAGUE_INITRATE, Count init_window = PRAGUE_INITWIN,
+      RateBps min_rate = PRAGUE_MINRATE, RateBps max_rate = PRAGUE_MAXRATE);
 
   virtual ~PragueCC();
 
-  virtual time_tp
+  virtual TimeUs
   Now(); // Can be overwritten (e.g. for simulators),
          // needs a monotonic increasing signed int 32 which wraps around (after
          // exactly 4294.967296 seconds) and skips 0 as a special value, so
          // value 1 lasts 2 microseconds
 
-  time_tp get_ref_rtt();
+  TimeUs get_ref_rtt();
 
-  count_tp get_alpha_shift();
+  Count get_alpha_shift();
 
-  bool RFC8888Received(size_t num_rtt, time_tp *pkts_rtt);
+  bool RFC8888Received(size_t num_rtt, TimeUs *pkts_rtt);
 
   bool PacketReceived( // call this when a packet is received from peer, returns
                        // false if the old packet is ignored
-      time_tp timestamp, // timestamp from peer, freeze and keep this time
-      time_tp echoed_timestamp); // echoed_timestamp can be used to calculate
-                                 // the RTT
+      TimeUs timestamp, // timestamp from peer, freeze and keep this time
+      TimeUs echoed_timestamp); // echoed_timestamp can be used to calculate
+                                // the RTT
 
   bool ACKReceived( // call this when an ACK is received from peer, returns
                     // false if the old ack is ignored
-      count_tp packets_received, // echoed_packet counter
-      count_tp packets_CE,       // echoed CE counter
-      count_tp packets_lost,     // echoed lost counter
-      count_tp
-          packets_sent, // local counter of packets sent up to now, an RTT is
-                        // reached if remote ACK packets_received+packets_lost
+      Count packets_received, // echoed_packet counter
+      Count packets_CE,       // echoed CE counter
+      Count packets_lost,     // echoed lost counter
+      Count packets_sent, // local counter of packets sent up to now, an RTT is
+                          // reached if remote ACK packets_received+packets_lost
       bool error_L4S, // receiver found a bleached/error ECN; stop using L4S_id
                       // on the sending packets!
-      count_tp &inflight); // how many packets are in flight after the ACKed);
-
-  // can this be combined with ACKReceived?
-  /*bool FrameACKReceived(     // call this when a frame ACK is received from
-     peer count_tp packets_received, // echoed_packet counter count_tp
-     packets_CE,       // echoed CE counter count_tp packets_lost,     // echoed
-     lost counter bool error_L4S);           // receiver found a bleached/error
-     ECN; stop using L4S_id on the sending packets!*/
+      Count &inflight); // how many packets are in flight after the ACKed);
 
   void DataReceived( // call this when a data packet is received as a receiver
                      // and you can identify lost packets
-      ecn_tp ip_ecn, // IP.ECN field value
-      count_tp packets_lost); // packets skipped; can be optionally -1 to
-                              // potentially undo a previous cwindow reduction
+      Ecn ip_ecn,    // IP.ECN field value
+      Count packets_lost); // packets skipped; can be optionally -1 to
+                           // potentially undo a previous cwindow reduction
 
-  void DataReceivedSequence(   // call this every time when a data packet with a
-                               // sequence number is received as a receiver
-      ecn_tp ip_ecn,           // IP.ECN field value
-      count_tp packet_seq_nr); // sequence number of the received packet
+  void DataReceivedSequence( // call this every time when a data packet with a
+                             // sequence number is received as a receiver
+      Ecn ip_ecn,            // IP.ECN field value
+      Count packet_seq_nr);  // sequence number of the received packet
 
   void ResetCCInfo(); // call this when there is a RTO detected
 
-  void GetTimeInfo(              // when the any-app needs to send a packet
-      time_tp &timestamp,        // Own timestamp to echo by peer
-      time_tp &echoed_timestamp, // defrosted timestamp echoed to peer
-      ecn_tp &ip_ecn);           // ecn field to be set in the IP header
+  void GetTimeInfo(             // when the any-app needs to send a packet
+      TimeUs &timestamp,        // Own timestamp to echo by peer
+      TimeUs &echoed_timestamp, // defrosted timestamp echoed to peer
+      Ecn &ip_ecn);             // ecn field to be set in the IP header
 
-  void GetCCInfo(              // when the sending-app needs to send a packet
-      rate_tp &pacing_rate,    // rate to pace the packets
-      count_tp &packet_window, // the congestion window in number of packets
-      count_tp
+  void GetCCInfo(           // when the sending-app needs to send a packet
+      RateBps &pacing_rate, // rate to pace the packets
+      Count &packet_window, // the congestion window in number of packets
+      Count
           &packet_burst, // number of packets that can be paced at once (<250µs)
-      size_tp &packet_size); // the packet size to transmit
+      SizeB &packet_size); // the packet size to transmit
 
-  void GetACKInfo( // when the receiving-app needs to send a packet
-      count_tp &packets_received, // packet counter to echo
-      count_tp &packets_CE,       // CE counter to echo
-      count_tp &packets_lost,     // lost counter to echo (if used)
-      bool &error_L4S);           // bleached/error ECN status to echo
+  void GetACKInfo(             // when the receiving-app needs to send a packet
+      Count &packets_received, // packet counter to echo
+      Count &packets_CE,       // CE counter to echo
+      Count &packets_lost,     // lost counter to echo (if used)
+      bool &error_L4S);        // bleached/error ECN status to echo
 
-  void GetCCInfoVideo(        // when the sending app needs to send a frame
-      rate_tp &pacing_rate,   // rate to pace the packets
-      size_tp &frame_size,    // the size of a single frame in Bytes
-      count_tp &frame_window, // the congestion window in number of frames
-      count_tp
+  void GetCCInfoVideo(      // when the sending app needs to send a frame
+      RateBps &pacing_rate, // rate to pace the packets
+      SizeB &frame_size,    // the size of a single frame in Bytes
+      Count &frame_window,  // the congestion window in number of frames
+      Count
           &packet_burst, // number of packets that can be paced at once (<250µs)
-      size_tp &packet_size); // the packet size to transmit
+      SizeB &packet_size); // the packet size to transmit
 
-  void GetStats(PragueState &stats) // For logging purposes
-  {
-    stats = *this; // makes a copy of the internal state and parameters
-  }
+  // Returns a copy of the internal state and parameters for logging purposes
+  void GetStats(PragueState &stats) { stats = *this; }
 
-  const PragueState *GetStatePtr() // For logging purposes
-  {
-    return this; // gives a const pointer for reading the live state
-  }
+  // Returns a const pointer for reading the live state for logging purposes
+  const PragueState *GetStatePtr() { return this; }
 
 private:
-  inline void updateAlpha(time_tp now, count_tp packets_sent,
-                          count_tp packets_received, count_tp packets_CE);
-  inline void reduceOnLoss(time_tp now, count_tp packets_sent);
+  inline void updateAlpha(TimeUs now, Count packets_sent,
+                          Count packets_received, Count packets_CE);
+  inline void reduceOnLoss(TimeUs now, Count packets_sent);
   inline void restoreReduction();
-  inline void applyIncrease(time_tp srtt, count_tp acks);
+  inline void applyIncrease(TimeUs srtt, Count acks);
 };
 #endif // PRAGUE_CC_H

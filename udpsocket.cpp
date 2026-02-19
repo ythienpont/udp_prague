@@ -60,7 +60,7 @@ int last_error_code() {
 }
 
 // Wait for a socket to become readable within a timeout
-bool wait_for_readable(SocketHandle s, time_tp timeout) {
+bool wait_for_readable(SocketHandle s, TimeUs timeout) {
   assert(is_socket_valid(s));
   assert(timeout >= 0);
 
@@ -173,20 +173,20 @@ Endpoint resolve_endpoint(const char *addr, uint16_t port) {
 }
 
 #ifdef _WIN32
-bool parse_ecn_cmsg(PCMSGHDR c, ecn_tp &ecn) {
+bool parse_ecn_cmsg(PCMSGHDR c, Ecn &ecn) {
   if (c->cmsg_level == IPPROTO_IP && c->cmsg_type == IP_ECN) {
-    ecn = ecn_tp(*(PINT)WSA_CMSG_DATA(c));
+    ecn = Ecn(*(PINT)WSA_CMSG_DATA(c));
     return true;
   }
 
   if (c->cmsg_level == IPPROTO_IPV6 && c->cmsg_type == IPV6_ECN) {
-    ecn = ecn_tp(*(PINT)WSA_CMSG_DATA(c));
+    ecn = Ecn(*(PINT)WSA_CMSG_DATA(c));
     return true;
   }
 
   return false;
 }
-void fill_ecn_cmsg(PCMSGHDR c, int family, ecn_tp ecn) {
+void fill_ecn_cmsg(PCMSGHDR c, int family, Ecn ecn) {
   c->cmsg_len = WSA_CMSG_LEN(sizeof(INT));
   c->cmsg_level = (family == AF_INET) ? IPPROTO_IP : IPPROTO_IPV6;
   c->cmsg_type = (family == AF_INET) ? IP_ECN : IPV6_ECN;
@@ -194,13 +194,11 @@ void fill_ecn_cmsg(PCMSGHDR c, int family, ecn_tp ecn) {
 }
 #else
 // ECN is stored in the low 2 bits of the IP TOS (IPv4) or Traffic Class (IPv6).
-ecn_tp decode_ecn(int tos_or_tc) {
-  return static_cast<ecn_tp>(tos_or_tc & ECN_MASK);
-}
+Ecn decode_ecn(int tos_or_tc) { return static_cast<Ecn>(tos_or_tc & ECN_MASK); }
 
-int encode_ecn(ecn_tp e) { return int(e) & ECN_MASK; }
+int encode_ecn(Ecn e) { return int(e) & ECN_MASK; }
 
-bool parse_ecn_cmsg(cmsghdr *c, ecn_tp &ecn) {
+bool parse_ecn_cmsg(cmsghdr *c, Ecn &ecn) {
   if (c->cmsg_level == IPPROTO_IP && c->cmsg_type == IP_RECV_CMSG_TYPE) {
     int tos;
     memcpy(&tos, CMSG_DATA(c), sizeof(tos));
@@ -218,7 +216,7 @@ bool parse_ecn_cmsg(cmsghdr *c, ecn_tp &ecn) {
   return false;
 }
 
-void fill_ecn_cmsg(cmsghdr *c, int family, ecn_tp ecn) {
+void fill_ecn_cmsg(cmsghdr *c, int family, Ecn ecn) {
   c->cmsg_len = CMSG_LEN(sizeof(int));
 
   if (family == AF_INET) {
@@ -400,8 +398,7 @@ void UDPSocket::Connect(const char *addr, uint16_t port) {
 #endif
 }
 
-size_tp UDPSocket::Receive(char *buf, size_tp len, ecn_tp &ecn,
-                           time_tp timeout) {
+SizeB UDPSocket::Receive(char *buf, SizeB len, Ecn &ecn, TimeUs timeout) {
   assert(buf != nullptr);
   assert(len > 0);
   assert(is_socket_valid(socket));
@@ -468,11 +465,11 @@ size_tp UDPSocket::Receive(char *buf, size_tp len, ecn_tp &ecn,
     }
   }
 
-  return static_cast<size_tp>(r);
+  return static_cast<SizeB>(r);
 #endif
 }
 
-size_tp UDPSocket::Send(char *buf, size_tp len, ecn_tp ecn) {
+SizeB UDPSocket::Send(char *buf, SizeB len, Ecn ecn) {
   assert(ecn == ecn_not_ect || ecn == ecn_ect0 || ecn == ecn_l4s_id ||
          ecn == ecn_ce);
 
@@ -522,6 +519,6 @@ size_tp UDPSocket::Send(char *buf, size_tp len, ecn_tp ecn) {
   if (rc < 0)
     throw std::system_error(errno, std::system_category(), "sendmsg");
 
-  return static_cast<size_tp>(rc);
+  return static_cast<SizeB>(rc);
 #endif
 }

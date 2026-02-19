@@ -66,8 +66,8 @@ public:
   void Bind(const char *addr, uint16_t port);
   void Connect(const char *addr, uint16_t port);
 
-  size_tp Receive(char *buf, size_tp len, ecn_tp &ecn, time_tp timeout);
-  size_tp Send(char *buf, size_tp len, ecn_tp ecn);
+  SizeB Receive(char *buf, SizeB len, Ecn &ecn, TimeUs timeout);
+  SizeB Send(char *buf, SizeB len, Ecn ecn);
 
 private:
   void init_io();
