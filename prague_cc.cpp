@@ -118,7 +118,6 @@ PragueCC::PragueCC(size_tp max_packet_size, fps_tp fps, time_tp frame_budget,
   m_start_ref = 0;
   time_tp ts_now = Now();
 
-  // Parameters
   m_init_rate = init_rate;
   m_init_window = window_tp(init_window) * max_packet_size * 1000000;
   m_min_rate = min_rate;
@@ -129,34 +128,31 @@ PragueCC::PragueCC(size_tp max_packet_size, fps_tp fps, time_tp frame_budget,
   if (m_frame_budget > m_frame_interval)
     m_frame_budget = m_frame_interval;
 
-  // Both end variables
-  m_ts_remote = 0; // to keep the frozen timestamp from the peer, and echo it
-                   // back defrosted
-  m_rtt = 0;       // last reported rtt (only for stats)
-  m_srtt = 0;      // our own measured and smoothed RTT (smoothing factor = 1/8)
-  m_vrtt = 0;      // our own virtual RTT = max(srtt, 25ms)
-                   // receiver end variables (to be echoed to sender)
-  m_r_prev_ts = 0; // used to see if an ack isn't older than the previous ack
-  m_r_packets_received = 0; // as a receiver, keep counters to echo back
+  m_ts_remote = 0;
+
+  m_rtt = 0;
+  m_srtt = 0;
+  m_vrtt = 0;
+
+  m_r_prev_ts = 0;
+  m_r_packets_received = 0;
   m_r_packets_CE = 0;
   m_r_packets_lost = 0;
-  m_r_error_L4S = false;  // as a receiver, check L4S-ECN validity to echo back
-                          // an error sender end variables
-  m_cc_ts = ts_now;       // time of last cc update
-  m_packets_received = 0; // latest known receiver end counters
+  m_r_error_L4S = false;
+
+  m_cc_ts = ts_now;
+  m_packets_received = 0;
   m_packets_CE = 0;
   m_packets_lost = 0;
   m_packets_sent = 0;
-  m_error_L4S = false; // latest known receiver end error state
+  m_error_L4S = false;
 
-  // For alpha calculation, keep the previous alpha variables' state
-  m_alpha_ts = ts_now; // start recording alpha from now on (every vrtt)
+  m_alpha_ts = ts_now; // Start recording alpha from now on (every vrtt)
   m_alpha_packets_received = 0;
   m_alpha_packets_CE = 0;
   m_alpha_packets_lost = 0;
   m_alpha_packets_sent = 0;
 
-  // For loss and recovery calculation
   m_loss_ts = 0;
   m_loss_cca = cca_prague_win;
   m_lost_window = 0;
@@ -165,25 +161,23 @@ PragueCC::PragueCC(size_tp max_packet_size, fps_tp fps, time_tp frame_budget,
   m_loss_packets_sent = 0;
   m_lost_rtts_to_growth = 0;
 
-  // For congestion experienced and window reduction (cwr) calculation
   m_cwr_ts = 0;
   m_cwr_packets_sent = 0;
 
-  // State updated for the actual congestion control variables
-
   m_cc_state = cs_init;
   m_cca_mode = cca_prague_win;
-  // Virtual rtts before going into growth mode
   m_rtts_to_growth = init_rate / RATE_STEP + MIN_STEP;
   m_alpha = 0;
   m_pacing_rate = init_rate;
   m_fractional_window = m_init_window;
+
   // B/p = B/s * 25ms/burst / 2p/window
   m_packet_size = m_pacing_rate * get_ref_rtt() / 1000000 / MIN_PKT_WIN;
   if (m_packet_size < PRAGUE_MINMTU)
     m_packet_size = PRAGUE_MINMTU;
   if (m_packet_size > m_max_packet_size)
     m_packet_size = m_max_packet_size;
+
   // p = B/s * 250µs / B/p
   m_packet_burst =
       count_tp(m_pacing_rate * BURST_TIME / 1000000 / m_packet_size);
@@ -210,13 +204,8 @@ bool PragueCC::RFC8888Received(size_t num_rtt, time_tp *pkts_rtt) {
   return true;
 }
 
-bool PragueCC::PacketReceived( // call this when a packet is received from peer.
-                               // Returns true if this is a newer packet, false
-                               // if this is an older
-    const time_tp timestamp,   // timestamp from peer, freeze and keep this time
-    const time_tp
-        echoed_timestamp) // echoed_timestamp can be used to calculate the RTT
-{
+bool PragueCC::PacketReceived(const time_tp timestamp,
+                              const time_tp echoed_timestamp) {
   // Ignore older or invalid ACKs (these counters can't go down in new ACKs)
   if ((m_cc_state != cs_init) && (m_r_prev_ts - timestamp > 0))
     return false;
@@ -238,19 +227,9 @@ bool PragueCC::PacketReceived( // call this when a packet is received from peer.
   return true;
 }
 
-bool PragueCC::ACKReceived(    // call this when an ACK is received from peer.
-                               // Returns true if this is a newer ACK, false if
-                               // this is an old ACK
-    count_tp packets_received, // echoed_packet counter
-    count_tp packets_CE,       // echoed CE counter
-    count_tp packets_lost,     // echoed lost counter
-    count_tp
-        packets_sent, // local counter of packets sent up to now, an RTT is
-                      // reached if remote ACK packets_received+packets_lost
-    bool error_L4S, // receiver found a bleached/error ECN; stop using L4S_id on
-                    // the sending packets!
-    count_tp &inflight) // how many packets are in flight after the ACKed
-{
+bool PragueCC::ACKReceived(count_tp packets_received, count_tp packets_CE,
+                           count_tp packets_lost, count_tp packets_sent,
+                           bool error_L4S, count_tp &inflight) {
   // Ignore older or invalid ACKs (these counters can't go down in new ACKs)
   if ((m_packets_received - packets_received > 0) ||
       (m_packets_CE - packets_CE > 0))
@@ -477,11 +456,7 @@ bool PragueCC::ACKReceived(    // call this when an ACK is received from peer.
   return true;
 }
 
-void PragueCC::DataReceivedSequence( // call this every time when a data packet
-                                     // is received as a receiver
-    ecn_tp ip_ecn,                   // IP.ECN field value
-    count_tp packet_seq_nr)          // sequence number of the received packet
-{
+void PragueCC::DataReceivedSequence(ecn_tp ip_ecn, count_tp packet_seq_nr) {
   ip_ecn = ecn_tp(ip_ecn & ecn_ce);
   m_r_packets_received++; // Assuming no duplicates (by for instance the NW)
   count_tp skipped = packet_seq_nr - m_r_packets_received - m_r_packets_lost;
@@ -497,12 +472,7 @@ void PragueCC::DataReceivedSequence( // call this every time when a data packet
     m_r_error_L4S = true;
 }
 
-void PragueCC::DataReceived( // call this when a data packet is received as a
-                             // receiver and you can identify lost packets
-    ecn_tp ip_ecn,           // IP.ECN field value
-    count_tp packets_lost)   // packets skipped; can be optionally -1 to
-                             // potentially undo a previous cwindow reduction
-{
+void PragueCC::DataReceived(ecn_tp ip_ecn, count_tp packets_lost) {
   ip_ecn = ecn_tp(ip_ecn & ecn_ce);
   m_r_packets_received++;
   m_r_packets_lost += packets_lost;
@@ -512,8 +482,7 @@ void PragueCC::DataReceived( // call this when a data packet is received as a
     m_r_error_L4S = true;
 }
 
-void PragueCC::ResetCCInfo() // call this when there is a RTO detected
-{
+void PragueCC::ResetCCInfo() {
   m_cc_ts = Now();
   m_cc_state = cs_init;
   m_cca_mode = cca_prague_win;
@@ -528,23 +497,16 @@ void PragueCC::ResetCCInfo() // call this when there is a RTO detected
   m_lost_rtts_to_growth = 0;
 }
 
-void PragueCC::GetTimeInfo(    // when the any-app needs to send a packet
-    time_tp &timestamp,        // Own timestamp to echo by peer
-    time_tp &echoed_timestamp, // defrosted timestamp echoed to peer
-    ecn_tp &ip_ecn) {
+void PragueCC::GetTimeInfo(time_tp &timestamp, time_tp &echoed_timestamp,
+                           ecn_tp &ip_ecn) {
   timestamp = Now();
 
   echoed_timestamp = (m_ts_remote != 0) ? timestamp - m_ts_remote : 0;
   ip_ecn = (m_error_L4S) ? ecn_not_ect : ecn_l4s_id;
 }
 
-void PragueCC::GetCCInfo(    // when the sending-app needs to send a packet
-    rate_tp &pacing_rate,    // rate to pace the packets
-    count_tp &packet_window, // the congestion window in number of packets
-    count_tp
-        &packet_burst, // number of packets that can be paced at once (<250µs)
-    size_tp &packet_size) // the packet size to transmit
-{
+void PragueCC::GetCCInfo(rate_tp &pacing_rate, count_tp &packet_window,
+                         count_tp &packet_burst, size_tp &packet_size) {
   if (Now() - m_alpha_ts - (m_vrtt >> 1) >= 0)
     pacing_rate = m_pacing_rate * 100 / (100 + RATE_OFFSET);
   else
@@ -555,14 +517,9 @@ void PragueCC::GetCCInfo(    // when the sending-app needs to send a packet
   packet_size = m_packet_size;
 }
 
-void PragueCC::GetCCInfoVideo( // when the sending app needs to send a frame
-    rate_tp &pacing_rate,      // rate to pace the packets
-    size_tp &frame_size,       // the size of a single frame in Bytes
-    count_tp &frame_window,    // the congestion window in number of frames
-    count_tp
-        &packet_burst, // number of packets that can be paced at once (<250µs)
-    size_tp &packet_size) // the packet size to transmit
-{
+void PragueCC::GetCCInfoVideo(rate_tp &pacing_rate, size_tp &frame_size,
+                              count_tp &frame_window, count_tp &packet_burst,
+                              size_tp &packet_size) {
   pacing_rate = m_pacing_rate;
   packet_burst = m_packet_burst;
   packet_size = m_packet_size;
@@ -574,12 +531,8 @@ void PragueCC::GetCCInfoVideo( // when the sending app needs to send a frame
     frame_window = MIN_FRAME_WIN;
 }
 
-void PragueCC::GetACKInfo(      // when the receiving-app needs to send a packet
-    count_tp &packets_received, // packet counter to echo
-    count_tp &packets_CE,       // CE counter to echo
-    count_tp &packets_lost,     // lost counter to echo (if used)
-    bool &error_L4S)            // bleached/error ECN status to echo
-{
+void PragueCC::GetACKInfo(count_tp &packets_received, count_tp &packets_CE,
+                          count_tp &packets_lost, bool &error_L4S) {
   packets_received = m_r_packets_received;
   packets_CE = m_r_packets_CE;
   packets_lost = m_r_packets_lost;
