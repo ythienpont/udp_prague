@@ -208,8 +208,41 @@ public:
 private:
   inline void updateAlpha(TimeUs now, Count packets_sent,
                           Count packets_received, Count packets_marked);
-  inline void reduceOnLoss(TimeUs now, Count packets_sent);
-  inline void restoreReduction();
+  inline void reduceOnLoss(TimeUs now);
+  inline void reduceOnMarks();
+  inline void undo_loss_reduction();
   inline void applyIncrease(TimeUs srtt, Count acks);
+
+  inline void select_mode(TimeUs srtt);
+
+  inline bool alpha_update_due(TimeUs now, Count packets_received,
+                               Count packets_lost);
+
+  inline bool ack_is_stale(Count packets_received, Count packets_marked);
+
+  inline SizeB compute_packet_size(TimeUs rtt) const;
+  inline Count compute_packet_burst() const;
+
+  /* --- State predicates --- */
+  bool in_init(void) const;
+  bool in_cong_avoid(void) const;
+  bool in_loss(void) const;
+  bool in_cwr(void) const;
+
+  /* --- State transitions --- */
+  void enter_cong_avoid(void);
+  void enter_loss(TimeUs now, Count packets_sent);
+  void exit_loss(void);
+  void enter_cwr(TimeUs now, Count packets_sent);
+  void exit_cwr(void);
+  void reset_to_init(void);
+
+  /* --- Transition conditions --- */
+  bool startup_done(void) const;
+  bool loss_recovery_done(TimeUs now, Count packets_received,
+                          Count packets_lost) const;
+  bool cwr_done(TimeUs now, Count packets_received, Count packets_lost) const;
+  bool new_loss(Count packets_lost) const;
+  bool new_marks(Count packets_marked) const;
 };
 #endif // PRAGUE_CC_H
